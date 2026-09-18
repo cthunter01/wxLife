@@ -1,0 +1,108 @@
+#pragma once
+
+#include <array>
+#include <cstdint>
+#include <string_view>
+#include <utility>
+
+namespace wxLife::core
+{
+
+using Cell      = std::uint8_t;  ///< 0 = dead, 1 = alive. One byte keeps neighbour sums trivial.
+using Coord     = std::int32_t;  ///< Cell coordinate or side length (at most kMaxWorldSide).
+using CellCount = std::int64_t;  ///< Areas and populations, which can exceed 2^31.
+
+inline constexpr Cell kDead  = 0;
+inline constexpr Cell kAlive = 1;
+
+/// How the world treats its edges. The core branches on it only in switches without `default`, so
+/// -Wswitch lists every place there that a new topology needs.
+enum class Topology : std::uint8_t
+{
+    Bounded,  ///< Cells beyond the edge are always dead.
+    Torus,    ///< Opposite edges are neighbours.
+};
+
+/// Every Topology, so tests cover a new one automatically.
+inline constexpr std::array kTopologies{Topology::Bounded, Topology::Torus};
+
+[[nodiscard]] constexpr std::string_view toString(Topology t) noexcept
+{
+    switch (t)
+    {
+        case Topology::Bounded:
+            return "bounded";
+        case Topology::Torus:
+            return "torus";
+    }
+    std::unreachable();
+}
+
+/// Which automaton the world runs. The core branches on it only in switches without `default`, so
+/// -Wswitch lists every place there that a new automaton needs.
+enum class Automaton : std::uint8_t
+{
+    Life,        ///< A two-state B/S rule, stepped by a Stepper.
+    LangtonAnt,  ///< Langton's ant: the cells are its tape, and the ants are the only movers.
+};
+
+/// Every Automaton, so tests cover a new one automatically.
+inline constexpr std::array kAutomata{Automaton::Life, Automaton::LangtonAnt};
+
+[[nodiscard]] constexpr std::string_view toString(Automaton a) noexcept
+{
+    switch (a)
+    {
+        case Automaton::Life:
+            return "Life";
+        case Automaton::LangtonAnt:
+            return "Langton's ant";
+    }
+    std::unreachable();
+}
+
+/// Cell position; (0, 0) is the top-left cell.
+struct CellPos
+{
+    Coord x = 0;
+    Coord y = 0;
+
+    friend constexpr bool operator==(CellPos, CellPos) noexcept = default;
+};
+
+/// Width and height of a world, in cells.
+struct Extent
+{
+    Coord width  = 0;
+    Coord height = 0;
+
+    [[nodiscard]] constexpr CellCount cellCount() const noexcept
+    {
+        return CellCount{width} * height;
+    }
+    [[nodiscard]] constexpr bool contains(CellPos p) const noexcept
+    {
+        return p.x >= 0 && p.y >= 0 && p.x < width && p.y < height;
+    }
+
+    friend constexpr bool operator==(Extent, Extent) noexcept = default;
+};
+
+/// Half-open cell rectangle [x0, x1) × [y0, y1).
+struct CellRect
+{
+    Coord x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return x0 >= x1 || y0 >= y1; }
+
+    friend constexpr bool operator==(CellRect, CellRect) noexcept = default;
+};
+
+/// Division rounding toward negative infinity. @pre b > 0
+[[nodiscard]] constexpr std::int64_t floorDiv(std::int64_t a, std::int64_t b) noexcept
+{
+    const std::int64_t q = a / b;  // rounds toward zero
+    return (a % b != 0 && a < 0) ? q - 1 : q;
+}
+
+}  // namespace wxLife::core

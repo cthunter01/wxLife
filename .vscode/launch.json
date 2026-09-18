@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      // Debugs the CMake Tools launch target (status bar). Pick wxLife_tests there to debug the tests.
+      "name": "Debug launch target (gdb)",
+      "type": "cppdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [],
+      "cwd": "${workspaceFolder}",
+      "MIMode": "gdb",
+      "setupCommands": [
+        { "description": "Pretty-print STL containers", "text": "-enable-pretty-printing", "ignoreFailures": true }
+      ]
+    }
+  ]
+}

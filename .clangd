@@ -1,0 +1,7 @@
+# clangd reads compile_commands.json from the project root (CMake symlinks it to the last-configured preset)
+# and its clang-tidy checks from .clang-tidy.
+CompileFlags:
+  # GCC-only -W flags are unknown to clangd's Clang frontend when a gcc-* preset was configured last.
+  Add: [-Wno-unknown-warning-option]
+Diagnostics:
+  UnusedIncludes: Strict

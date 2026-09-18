@@ -1,0 +1,8 @@
+# The project's checks, adjusted for GoogleTest.
+InheritParentConfig: true
+CheckOptions:
+  # Every EXPECT_* and ASSERT_* macro expands to branches, which would count as complexity of the test.
+  readability-function-cognitive-complexity.IgnoreMacros: true
+  # The check does not see that ASSERT_TRUE(cell) returns when `cell` is empty, so the tests read optionals
+  # with value(), which throws instead of reading an empty optional.
+  bugprone-unchecked-optional-access.IgnoreValueCalls: true

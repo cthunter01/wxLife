@@ -1,0 +1,5 @@
+# The checks of tests/, adjusted for wxWidgets code.
+InheritParentConfig: true
+# wx windows are created with `new` and deleted by wx after they are closed; there is no gsl::owner to hand
+# them over with.
+Checks: '-cppcoreguidelines-owning-memory'

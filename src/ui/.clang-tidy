@@ -1,0 +1,5 @@
+# The project's checks, adjusted for wxWidgets code.
+InheritParentConfig: true
+# wx windows are created with `new` and owned by their parent window (sizers by their window, menus by the
+# menu bar), which wx deletes; there is no gsl::owner to hand them over with.
+Checks: '-cppcoreguidelines-owning-memory'

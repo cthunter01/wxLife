@@ -1,0 +1,22 @@
+# Build output (every preset builds into build/<preset>)
+build/
+out/
+Testing/
+*.profraw
+*.profdata
+
+# Tooling
+.cache/
+compile_commands.json
+CMakeUserPresets.json
+.claude/settings.local.json
+*.swp
+*~
+
+# Editors: share only the four VS Code files the template provides
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+!.vscode/tasks.json
+!.vscode/launch.json
+.idea/

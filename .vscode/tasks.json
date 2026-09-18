@@ -1,0 +1,40 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Build (active preset)",
+      "type": "cmake",
+      "command": "build",
+      "targets": ["all"],
+      "preset": "${command:cmake.activeBuildPresetName}",
+      "group": { "kind": "build", "isDefault": true },
+      "problemMatcher": ["$gcc"]
+    },
+    {
+      "label": "Test (active preset)",
+      "type": "cmake",
+      "command": "test",
+      "preset": "${command:cmake.activeTestPresetName}",
+      "group": { "kind": "test", "isDefault": true },
+      "problemMatcher": []
+    },
+    {
+      "label": "Format all sources",
+      "type": "shell",
+      "command": "git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' | xargs -0 --no-run-if-empty clang-format -i",
+      "problemMatcher": []
+    },
+    {
+      "label": "Coverage report",
+      "type": "shell",
+      "command": "cmake --workflow --preset coverage && xdg-open build/coverage/coverage/html/index.html",
+      "problemMatcher": []
+    },
+    {
+      "label": "Doxygen docs",
+      "type": "shell",
+      "command": "cmake --preset clang-debug && cmake --build --preset clang-debug --target docs && xdg-open build/clang-debug/docs/html/index.html",
+      "problemMatcher": []
+    }
+  ]
+}

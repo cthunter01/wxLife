@@ -1,0 +1,39 @@
+# Builds and tests every CI preset, and checks formatting.
+# Runs in an Arch Linux container so CI has the same current GCC/Clang as the dev machine.
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    name: ${{ matrix.preset }}
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [ci-gcc, ci-clang, asan, tidy]
+    steps:
+      # gtk3 (and its zlib, libpng, expat and pcre2) for the static wxWidgets build; libsm for its X11 session
+      # support. There is no display, so the GUI smoke tests skip themselves.
+      - name: Install toolchain
+        run: pacman -Syu --noconfirm --needed cmake ninja clang git gtk3 libsm
+      - uses: actions/checkout@v7
+      - name: Configure, build and test
+        run: cmake --workflow --preset ${{ matrix.preset }}
+
+  format:
+    name: clang-format
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install clang-format
+        run: pacman -Syu --noconfirm --needed clang git
+      - uses: actions/checkout@v7
+      - name: Check formatting
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' \
+            | xargs -0 --no-run-if-empty clang-format --dry-run --Werror

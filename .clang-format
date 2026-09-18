@@ -1,0 +1,47 @@
+BasedOnStyle: Google
+AccessModifierOffset: -4
+AlignConsecutiveAssignments: Consecutive
+AlignConsecutiveBitFields: Consecutive
+AlignConsecutiveDeclarations: Consecutive
+AllowShortFunctionsOnASingleLine: Inline
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterClass: true
+  AfterControlStatement: Always
+  AfterEnum: true
+  AfterExternBlock: true
+  AfterFunction: true
+  AfterNamespace: true
+  AfterObjCDeclaration: false
+  AfterStruct: true
+  AfterUnion: true
+  BeforeCatch: true
+  BeforeElse: true
+  BeforeLambdaBody: false
+  BeforeWhile: false
+  IndentBraces: false
+  SplitEmptyFunction: true
+  SplitEmptyNamespace: false
+  SplitEmptyRecord: false
+BracedInitializerIndentWidth: -1
+BreakBeforeBraces: Custom
+ColumnLimit: 100
+ConstructorInitializerIndentWidth: 2
+Cpp11BracedListStyle: AlignFirstComment
+IndentCaseBlocks: false
+IndentWidth: 4
+InsertBraces: true
+LambdaBodyIndentation: Signature
+RemoveBracesLLVM: false
+SpaceInEmptyBraces: Always
+TabWidth: 4
+# Include order after the file's own header: C headers, standard library, third-party, this project.
+IncludeCategories:
+  - Regex: '^<(sys/)?[a-z0-9_]+\.h>$'
+    Priority: 1
+  - Regex: '^<[a-z0-9_]+>$'
+    Priority: 2
+  - Regex: '^<'
+    Priority: 3
+  - Regex: '^"'
+    Priority: 4

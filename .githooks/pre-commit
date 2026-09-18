@@ -1,0 +1,25 @@
+#!/usr/bin/env bash
+# Rejects a commit when a staged C/C++ file is not clang-format clean (the same whole-file check CI runs).
+# Enabled by: git config core.hooksPath .githooks      Bypass once: git commit --no-verify
+set -euo pipefail
+
+if ! command -v clang-format >/dev/null; then
+    echo "pre-commit: clang-format not found; skipping the format check" >&2
+    exit 0
+fi
+
+unformatted=()
+while IFS= read -r -d '' file; do
+    # Check the staged content, not the working tree, so partially staged files are judged correctly.
+    if ! cmp -s <(git show ":$file") <(git show ":$file" | clang-format --assume-filename="$file"); then
+        unformatted+=("$file")
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACMR -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp')
+
+if ((${#unformatted[@]})); then
+    echo "pre-commit: these files are not clang-format clean:" >&2
+    printf '    %s\n' "${unformatted[@]}" >&2
+    echo "Fix with:    clang-format -i ${unformatted[*]} && git add ${unformatted[*]}" >&2
+    echo "Bypass with: git commit --no-verify" >&2
+    exit 1
+fi

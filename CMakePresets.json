@@ -1,0 +1,217 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 28, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_COLOR_DIAGNOSTICS": "ON"
+      }
+    },
+    {
+      "name": "clang",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_C_COMPILER": "clang", "CMAKE_CXX_COMPILER": "clang++" }
+    },
+    {
+      "name": "gcc",
+      "hidden": true,
+      "inherits": "base",
+      "cacheVariables": { "CMAKE_C_COMPILER": "gcc", "CMAKE_CXX_COMPILER": "g++" }
+    },
+    {
+      "name": "werror",
+      "hidden": true,
+      "cacheVariables": { "WXLIFE_WARNINGS_AS_ERRORS": "ON" }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Clang Debug",
+      "inherits": "clang",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "clang-release",
+      "displayName": "Clang Release",
+      "inherits": "clang",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "gcc-debug",
+      "displayName": "GCC Debug",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug" }
+    },
+    {
+      "name": "gcc-release",
+      "displayName": "GCC Release",
+      "inherits": "gcc",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Release" }
+    },
+    {
+      "name": "asan",
+      "displayName": "Clang Debug, AddressSanitizer + UndefinedBehaviorSanitizer",
+      "inherits": "clang",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WXLIFE_SANITIZERS": "address;undefined" }
+    },
+    {
+      "name": "tsan",
+      "displayName": "Clang RelWithDebInfo, ThreadSanitizer (no UI: GTK is not instrumented)",
+      "inherits": "clang",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+        "WXLIFE_SANITIZERS": "thread",
+        "WXLIFE_BUILD_UI": "OFF"
+      }
+    },
+    {
+      "name": "headless",
+      "displayName": "GCC Debug without the UI (no wxWidgets download)",
+      "description": "Builds the stepping kernel without AVX2 clones, so the tests cover the baseline kernel.",
+      "inherits": "gcc",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "WXLIFE_BUILD_UI": "OFF",
+        "WXLIFE_KERNEL_CLONES": "OFF"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Clang Debug, source-based coverage",
+      "inherits": "clang",
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WXLIFE_ENABLE_COVERAGE": "ON" }
+    },
+    {
+      "name": "tidy",
+      "displayName": "Clang Debug, clang-tidy while compiling, warnings as errors",
+      "inherits": ["clang", "werror"],
+      "cacheVariables": { "CMAKE_BUILD_TYPE": "Debug", "WXLIFE_ENABLE_CLANG_TIDY": "ON" }
+    },
+    {
+      "name": "ci-gcc",
+      "displayName": "GCC Release, warnings as errors",
+      "inherits": ["gcc-release", "werror"]
+    },
+    {
+      "name": "ci-clang",
+      "displayName": "Clang Release, warnings as errors",
+      "inherits": ["clang-release", "werror"]
+    }
+  ],
+  "buildPresets": [
+    { "name": "clang-debug", "configurePreset": "clang-debug" },
+    { "name": "clang-release", "configurePreset": "clang-release" },
+    { "name": "gcc-debug", "configurePreset": "gcc-debug" },
+    { "name": "gcc-release", "configurePreset": "gcc-release" },
+    { "name": "asan", "configurePreset": "asan" },
+    { "name": "tsan", "configurePreset": "tsan" },
+    { "name": "headless", "configurePreset": "headless" },
+    { "name": "coverage", "configurePreset": "coverage", "targets": ["coverage"] },
+    { "name": "tidy", "configurePreset": "tidy" },
+    { "name": "ci-gcc", "configurePreset": "ci-gcc" },
+    { "name": "ci-clang", "configurePreset": "ci-clang" }
+  ],
+  "testPresets": [
+    {
+      "name": "test-base",
+      "hidden": true,
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    { "name": "clang-debug", "inherits": "test-base", "configurePreset": "clang-debug" },
+    { "name": "clang-release", "inherits": "test-base", "configurePreset": "clang-release" },
+    { "name": "gcc-debug", "inherits": "test-base", "configurePreset": "gcc-debug" },
+    { "name": "gcc-release", "inherits": "test-base", "configurePreset": "gcc-release" },
+    {
+      "name": "asan",
+      "inherits": "test-base",
+      "configurePreset": "asan",
+      "environment": {
+        "ASAN_OPTIONS": "detect_leaks=1:detect_stack_use_after_return=1:strict_string_checks=1",
+        "UBSAN_OPTIONS": "print_stacktrace=1"
+      }
+    },
+    {
+      "name": "tsan",
+      "inherits": "test-base",
+      "configurePreset": "tsan",
+      "environment": { "TSAN_OPTIONS": "halt_on_error=1" }
+    },
+    { "name": "headless", "inherits": "test-base", "configurePreset": "headless" },
+    { "name": "tidy", "inherits": "test-base", "configurePreset": "tidy" },
+    { "name": "ci-gcc", "inherits": "test-base", "configurePreset": "ci-gcc" },
+    { "name": "ci-clang", "inherits": "test-base", "configurePreset": "ci-clang" }
+  ],
+  "workflowPresets": [
+    {
+      "name": "dev",
+      "displayName": "Configure, build and test Clang Debug",
+      "steps": [
+        { "type": "configure", "name": "clang-debug" },
+        { "type": "build", "name": "clang-debug" },
+        { "type": "test", "name": "clang-debug" }
+      ]
+    },
+    {
+      "name": "ci-gcc",
+      "steps": [
+        { "type": "configure", "name": "ci-gcc" },
+        { "type": "build", "name": "ci-gcc" },
+        { "type": "test", "name": "ci-gcc" }
+      ]
+    },
+    {
+      "name": "ci-clang",
+      "steps": [
+        { "type": "configure", "name": "ci-clang" },
+        { "type": "build", "name": "ci-clang" },
+        { "type": "test", "name": "ci-clang" }
+      ]
+    },
+    {
+      "name": "asan",
+      "steps": [
+        { "type": "configure", "name": "asan" },
+        { "type": "build", "name": "asan" },
+        { "type": "test", "name": "asan" }
+      ]
+    },
+    {
+      "name": "tsan",
+      "steps": [
+        { "type": "configure", "name": "tsan" },
+        { "type": "build", "name": "tsan" },
+        { "type": "test", "name": "tsan" }
+      ]
+    },
+    {
+      "name": "headless",
+      "steps": [
+        { "type": "configure", "name": "headless" },
+        { "type": "build", "name": "headless" },
+        { "type": "test", "name": "headless" }
+      ]
+    },
+    {
+      "name": "tidy",
+      "steps": [
+        { "type": "configure", "name": "tidy" },
+        { "type": "build", "name": "tidy" },
+        { "type": "test", "name": "tidy" }
+      ]
+    },
+    {
+      "name": "coverage",
+      "displayName": "Run the tests with coverage and write the report",
+      "steps": [
+        { "type": "configure", "name": "coverage" },
+        { "type": "build", "name": "coverage" }
+      ]
+    }
+  ]
+}
