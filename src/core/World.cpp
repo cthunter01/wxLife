@@ -155,7 +155,7 @@ bool World::setCell(CellPos p, Cell value) noexcept
 void World::clear() noexcept
 {
     m_current.clear();  // m_next is overwritten by the next step anyway
-    layOutAnts();      // generation 0 means the ants are back on their starting spots too
+    layOutAnts();       // generation 0 means the ants are back on their starting spots too
     m_generation = 0;
     m_population = 0;
 }
