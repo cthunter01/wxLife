@@ -120,10 +120,10 @@ using StatusBar = wxStatusBar;
 {
     switch (kind)
     {
-        case core::StepperKind::Banded:
-            return EngineBandedID;
-        case core::StepperKind::Reference:
-            return EngineReferenceID;
+        case core::StepperKind::BANDED:
+            return ID_ENGINE_BANDED;
+        case core::StepperKind::REFERENCE:
+            return ID_ENGINE_REFERENCE;
     }
     std::unreachable();
 }
@@ -133,10 +133,10 @@ using StatusBar = wxStatusBar;
 {
     switch (automaton)
     {
-        case core::Automaton::Life:
-            return AutomatonLifeID;
-        case core::Automaton::LangtonAnt:
-            return AutomatonAntID;
+        case core::Automaton::LIFE:
+            return ID_AUTOMATON_LIFE;
+        case core::Automaton::LANGTON_ANT:
+            return ID_AUTOMATON_ANT;
     }
     std::unreachable();
 }
@@ -150,10 +150,10 @@ using StatusBar = wxStatusBar;
         std::format("{} × {}", countText(extent.width), countText(extent.height));
     switch (world.automaton())
     {
-        case core::Automaton::Life:
+        case core::Automaton::LIFE:
             return std::format("{} · {} · {} · {}", size, core::toString(world.topology()),
                                world.rule().toString(), core::toString(world.stepper().kind()));
-        case core::Automaton::LangtonAnt:
+        case core::Automaton::LANGTON_ANT:
         {
             const std::size_t ants = world.ants().size();
             return std::format("{} · {} · {} ant{}", size, core::toString(world.automaton()), ants,
@@ -217,32 +217,32 @@ void MainFrame::bindCommands()
 {
     using Handler                = void (MainFrame::*)();
     static constexpr auto kTable = std::to_array<std::pair<CommandId, Handler>>({
-        {RunPauseID, &MainFrame::onRunPause},
-        {StepID, &MainFrame::onStep},
-        {ClearID, &MainFrame::onClear},
-        {RandomizeID, &MainFrame::onRandomize},
-        {FasterID, &MainFrame::onFaster},
-        {SlowerID, &MainFrame::onSlower},
-        {ToggleMaxSpeedID, &MainFrame::onToggleMaxSpeed},
-        {SpeedChangedID, &MainFrame::onSpeedChanged},
-        {AutomatonLifeID, &MainFrame::onAutomatonLife},
-        {AutomatonAntID, &MainFrame::onAutomatonAnt},
-        {AutomatonChangedID, &MainFrame::onAutomatonChanged},
-        {ResetAntsID, &MainFrame::onResetAnts},
-        {EngineBandedID, &MainFrame::onEngineBanded},
-        {EngineReferenceID, &MainFrame::onEngineReference},
-        {ZoomInID, &MainFrame::onZoomIn},
-        {ZoomOutID, &MainFrame::onZoomOut},
-        {ZoomFitID, &MainFrame::onZoomFit},
-        {CenterViewID, &MainFrame::onCenterView},
-        {CellSizeChangedID, &MainFrame::onCellSizeChanged},
-        {ToggleGridID, &MainFrame::onToggleGrid},
-        {WorldSizeID, &MainFrame::onWorldSize},
-        {ToggleWrapID, &MainFrame::onToggleWrap},
-        {ApplyRuleID, &MainFrame::onApplyRule},
-        {RulePresetID, &MainFrame::onRulePreset},
-        {FocusRuleID, &MainFrame::onFocusRule},
-        {ShowControlsHelpID, &MainFrame::onShowControlsHelp},
+        {ID_RUN_PAUSE, &MainFrame::onRunPause},
+        {ID_STEP, &MainFrame::onStep},
+        {ID_CLEAR, &MainFrame::onClear},
+        {ID_RANDOMIZE, &MainFrame::onRandomize},
+        {ID_FASTER, &MainFrame::onFaster},
+        {ID_SLOWER, &MainFrame::onSlower},
+        {ID_TOGGLE_MAX_SPEED, &MainFrame::onToggleMaxSpeed},
+        {ID_SPEED_CHANGED, &MainFrame::onSpeedChanged},
+        {ID_AUTOMATON_LIFE, &MainFrame::onAutomatonLife},
+        {ID_AUTOMATON_ANT, &MainFrame::onAutomatonAnt},
+        {ID_AUTOMATON_CHANGED, &MainFrame::onAutomatonChanged},
+        {ID_RESET_ANTS, &MainFrame::onResetAnts},
+        {ID_ENGINE_BANDED, &MainFrame::onEngineBanded},
+        {ID_ENGINE_REFERENCE, &MainFrame::onEngineReference},
+        {ID_ZOOM_IN, &MainFrame::onZoomIn},
+        {ID_ZOOM_OUT, &MainFrame::onZoomOut},
+        {ID_ZOOM_FIT, &MainFrame::onZoomFit},
+        {ID_CENTER_VIEW, &MainFrame::onCenterView},
+        {ID_CELL_SIZE_CHANGED, &MainFrame::onCellSizeChanged},
+        {ID_TOGGLE_GRID, &MainFrame::onToggleGrid},
+        {ID_WORLD_SIZE, &MainFrame::onWorldSize},
+        {ID_TOGGLE_WRAP, &MainFrame::onToggleWrap},
+        {ID_APPLY_RULE, &MainFrame::onApplyRule},
+        {ID_RULE_PRESET, &MainFrame::onRulePreset},
+        {ID_FOCUS_RULE, &MainFrame::onFocusRule},
+        {ID_SHOW_CONTROLS_HELP, &MainFrame::onShowControlsHelp},
     });
     for (const auto& [id, handler] : kTable)
     {
@@ -252,7 +252,7 @@ void MainFrame::bindCommands()
             // again. The canvas takes the focus back, except after Apply, so that a rejected rule
             // can be fixed.
             const wxObject* source = event.GetEventObject();
-            if (id != ApplyRuleID &&
+            if (id != ID_APPLY_RULE &&
                 (dynamic_cast<const wxButton*>(source) || dynamic_cast<const wxCheckBox*>(source)))
             {
                 m_canvas->SetFocus();
@@ -267,7 +267,7 @@ void MainFrame::bindCommands()
     Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& event) {
         if (event.GetModifiers() == wxMOD_CONTROL && event.GetKeyCode() == 'M')
         {
-            emitCommand(*this, ToggleMaxSpeedID);
+            emitCommand(*this, ID_TOGGLE_MAX_SPEED);
         }
         else
         {
@@ -336,12 +336,12 @@ void MainFrame::onSpeedChanged()
 
 void MainFrame::onAutomatonLife()
 {
-    setAutomaton(core::Automaton::Life);
+    setAutomaton(core::Automaton::LIFE);
 }
 
 void MainFrame::onAutomatonAnt()
 {
-    setAutomaton(core::Automaton::LangtonAnt);
+    setAutomaton(core::Automaton::LANGTON_ANT);
 }
 
 void MainFrame::onAutomatonChanged()
@@ -358,7 +358,7 @@ void MainFrame::onResetAnts()
 
 void MainFrame::onEngineBanded()
 {
-    setEngine(core::StepperKind::Banded);
+    setEngine(core::StepperKind::BANDED);
 }
 
 void MainFrame::onEngineReference()
@@ -366,7 +366,7 @@ void MainFrame::onEngineReference()
     // The menu item is disabled for larger worlds; this check keeps a stray event harmless.
     if (m_world.extent().cellCount() <= core::ReferenceStepper::kRecommendedMaxCells)
     {
-        setEngine(core::StepperKind::Reference);
+        setEngine(core::StepperKind::REFERENCE);
     }
     else
     {
@@ -433,10 +433,10 @@ void MainFrame::onWorldSize()
                 countText(request->extent.width), countText(request->extent.height));
             wxMessageBox(toWx(message), "World Size", wxOK | wxICON_ERROR, this);
         }
-        if (m_world.stepper().kind() == core::StepperKind::Reference &&
+        if (m_world.stepper().kind() == core::StepperKind::REFERENCE &&
             m_world.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
         {
-            setEngine(core::StepperKind::Banded);
+            setEngine(core::StepperKind::BANDED);
         }
     }
 
@@ -450,8 +450,8 @@ void MainFrame::onWorldSize()
 
 void MainFrame::onToggleWrap()
 {
-    const bool torus = m_world.topology() == core::Topology::Torus;
-    m_world.setTopology(torus ? core::Topology::Bounded : core::Topology::Torus);
+    const bool torus = m_world.topology() == core::Topology::TORUS;
+    m_world.setTopology(torus ? core::Topology::BOUNDED : core::Topology::TORUS);
     syncControls();
     updateStatusBar(true);
 }
@@ -477,7 +477,7 @@ void MainFrame::onRulePreset()
 
 void MainFrame::onFocusRule()
 {
-    if (m_world.automaton() != core::Automaton::Life)
+    if (m_world.automaton() != core::Automaton::LIFE)
     {
         return;  // the Rule group is greyed out, so there is nothing to focus
     }
@@ -526,7 +526,7 @@ void MainFrame::onPaintCells(std::span<const core::CellPos> cells, core::Cell va
 
 void MainFrame::onToggleAnt(core::CellPos cell)
 {
-    if (m_world.automaton() != core::Automaton::LangtonAnt)
+    if (m_world.automaton() != core::Automaton::LANGTON_ANT)
     {
         return;  // Ctrl+click means nothing to Life
     }
@@ -582,10 +582,10 @@ void MainFrame::syncControls()
     const bool         running = m_runner.isRunning();
     const core::Speed  speed   = m_runner.speed();
     const core::Extent extent  = m_world.extent();
-    const bool         torus   = m_world.topology() == core::Topology::Torus;
+    const bool         torus   = m_world.topology() == core::Topology::TORUS;
     // Life reads the rule, the topology and the engine. The ant reads none of them, and has ants
     // instead.
-    const bool life = m_world.automaton() == core::Automaton::Life;
+    const bool life = m_world.automaton() == core::Automaton::LIFE;
 
     // The rule text is left alone, so text the user is still editing survives.
     m_panel->setRunning(running);
@@ -598,18 +598,18 @@ void MainFrame::syncControls()
     m_panel->setWorldInfo(extent, core::worldBytes(extent));
 
     wxMenuBar& menus = *GetMenuBar();
-    menus.Check(ToggleMaxSpeedID, speed.unlimited);
-    menus.Check(ToggleGridID, m_canvas->showGrid());
-    menus.Check(ToggleWrapID, torus);
+    menus.Check(ID_TOGGLE_MAX_SPEED, speed.unlimited);
+    menus.Check(ID_TOGGLE_GRID, m_canvas->showGrid());
+    menus.Check(ID_TOGGLE_WRAP, torus);
     menus.Check(automatonMenuItem(m_world.automaton()), true);  // radio items: the others turn off
     menus.Check(engineMenuItem(m_world.stepper().kind()), true);
-    menus.Enable(EngineBandedID, life);
-    menus.Enable(EngineReferenceID,
+    menus.Enable(ID_ENGINE_BANDED, life);
+    menus.Enable(ID_ENGINE_REFERENCE,
                  life && extent.cellCount() <= core::ReferenceStepper::kRecommendedMaxCells);
-    menus.Enable(ToggleWrapID, life);
-    menus.Enable(FocusRuleID, life);
-    menus.Enable(ResetAntsID, !life);
-    menus.SetLabel(RunPauseID, running ? "&Pause\tF5" : "&Run\tF5");
+    menus.Enable(ID_TOGGLE_WRAP, life);
+    menus.Enable(ID_FOCUS_RULE, life);
+    menus.Enable(ID_RESET_ANTS, !life);
+    menus.SetLabel(ID_RUN_PAUSE, running ? "&Pause\tF5" : "&Run\tF5");
 }
 
 void MainFrame::updateStatusBar(bool force)

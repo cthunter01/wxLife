@@ -241,7 +241,7 @@ Scene randomScene(core::SplitMix64& rng)
         {
             ants.push_back({.position = {.x = static_cast<Coord>(pick(rng, 0, world.width - 1)),
                                          .y = static_cast<Coord>(pick(rng, 0, world.height - 1))},
-                            .heading  = core::Heading::North});
+                            .heading  = core::Heading::NORTH});
         }
     }
 
@@ -576,8 +576,8 @@ TEST(RasterizerTest, AntsFillTheirCellBodyButNotTheGridLine)
     // One ant on the live cell and one on the dead cell to its right; the cell left of them is
     // untouched.
     const std::vector<core::Ant> ants{
-        {.position = {.x = 1, .y = 0}, .heading = core::Heading::North},
-        {.position = {.x = 2, .y = 0}, .heading = core::Heading::East}};
+        {.position = {.x = 1, .y = 0}, .heading = core::Heading::NORTH},
+        {.position = {.x = 2, .y = 0}, .heading = core::Heading::EAST}};
 
     const std::string withLines = rows({
         "....-AAAA-AAAA-",
@@ -607,8 +607,8 @@ TEST(RasterizerTest, AntsOutsideTheViewAreSkipped)
     const Viewport    viewport = viewportFor(grid, {.width = 10, .height = 10}, 2,
                                              {.x = 0, .y = 0});  // shows cells (0, 0) to (4, 4)
     const std::vector<core::Ant> ants{
-        {.position = {.x = 19, .y = 19}, .heading = core::Heading::North},
-        {.position = {.x = 2, .y = 2}, .heading = core::Heading::North}};
+        {.position = {.x = 19, .y = 19}, .heading = core::Heading::NORTH},
+        {.position = {.x = 2, .y = 2}, .heading = core::Heading::NORTH}};
 
     const PixelBuffer frame = render(grid, viewport, style, ants);
     EXPECT_EQ(firstDifference(frame, grid, viewport, style, ants), "");
@@ -621,9 +621,9 @@ TEST(RasterizerTest, EveryCellSizeMatchesThePixelReference)
     const Grid       grid = randomGrid(rng, {.width = 23, .height = 17});
     // The corners and the middle, so ants are clipped at each canvas edge as the view scrolls.
     const std::vector<core::Ant> kAnts{
-        {.position = {.x = 0, .y = 0}, .heading = core::Heading::North},
-        {.position = {.x = 22, .y = 16}, .heading = core::Heading::South},
-        {.position = {.x = 11, .y = 8}, .heading = core::Heading::East}};
+        {.position = {.x = 0, .y = 0}, .heading = core::Heading::NORTH},
+        {.position = {.x = 22, .y = 16}, .heading = core::Heading::SOUTH},
+        {.position = {.x = 11, .y = 8}, .heading = core::Heading::EAST}};
     Rasterizer  rasterizer;
     PixelBuffer frame;
     for (int cellSize = kMinCellSize; cellSize <= kMaxCellSize; ++cellSize)

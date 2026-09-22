@@ -114,12 +114,12 @@ void World::step()
 {
     switch (m_automaton)
     {
-        case Automaton::Life:
+        case Automaton::LIFE:
             m_current.updateBorder(m_topology);
             m_population = m_stepper->step(m_current, m_next, m_rule, m_topology);
             std::swap(m_current, m_next);  // swaps the buffers, so no grid is allocated per step
             break;
-        case Automaton::LangtonAnt:
+        case Automaton::LANGTON_ANT:
             // One move each, in index order over the one grid, so an ant sees what the ones before
             // it left.
             for (Ant& ant : m_ants)
@@ -242,7 +242,7 @@ void World::setTopology(Topology topology) noexcept
 void World::setAutomaton(Automaton automaton)
 {
     m_automaton = automaton;
-    if (m_automaton == Automaton::LangtonAnt && m_ants.empty())
+    if (m_automaton == Automaton::LANGTON_ANT && m_ants.empty())
     {
         resetAnts(1);
     }
@@ -284,7 +284,7 @@ bool World::toggleAntAt(CellPos p) noexcept
     {
         return false;
     }
-    m_ants.push_back({.position = p, .heading = Heading::North});  // within the reserved capacity
+    m_ants.push_back({.position = p, .heading = Heading::NORTH});  // within the reserved capacity
     return true;
 }
 

@@ -176,7 +176,7 @@ void WorldCanvas::onPaint(wxPaintEvent& /*event*/)
     }
 
     m_rasterizer.render(m_world.cells(), m_viewport, m_style, m_frame);
-    if (m_world.automaton() == core::Automaton::LangtonAnt)
+    if (m_world.automaton() == core::Automaton::LANGTON_ANT)
     {
         render::drawAnts(m_world.ants(), m_viewport, m_style, m_frame);
     }
@@ -216,11 +216,11 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
     {
         m_pointer = point;
         setHovered(m_viewport.cellAt(point));
-        if (m_drag == Drag::Paint)
+        if (m_drag == Drag::PAINT)
         {
             continuePaint(point);
         }
-        else if (m_drag == Drag::Pan)
+        else if (m_drag == Drag::PAN)
         {
             m_viewport.panBy(m_lastPanPoint.x - point.x, m_lastPanPoint.y - point.y);
             m_lastPanPoint = point;
@@ -232,7 +232,7 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
         // wxGTK sends the second press of a double click only as a DCLICK, so that counts as a
         // press too.
         SetFocus();  // single-key shortcuts need the focus
-        if (m_drag != Drag::None)
+        if (m_drag != Drag::NONE)
         {
             return;  // a second button during a drag changes nothing
         }
@@ -241,7 +241,7 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
         m_dragButton = button;
         if (button == wxMOUSE_BTN_MIDDLE || (button == wxMOUSE_BTN_LEFT && event.ShiftDown()))
         {
-            m_drag         = Drag::Pan;
+            m_drag         = Drag::PAN;
             m_lastPanPoint = point;
             CaptureMouse();
         }
@@ -385,7 +385,7 @@ void WorldCanvas::onKeyDown(wxKeyEvent& event)
     // accelerator.
     if (event.GetModifiers() == wxMOD_CONTROL && event.GetKeyCode() == WXK_HOME)
     {
-        send(CenterViewID);
+        send(ID_CENTER_VIEW);
         return;
     }
     // Ctrl and Alt combinations belong to the menu accelerators. (Shift does not count as a
@@ -427,29 +427,29 @@ void WorldCanvas::onKeyDown(wxKeyEvent& event)
             cancelStroke();
             break;
         case WXK_SPACE:
-            send(RunPauseID);
+            send(ID_RUN_PAUSE);
             break;
         case 'N':
-            send(StepID);
+            send(ID_STEP);
             break;
         case WXK_NUMPAD_ADD:
-            send(ZoomInID);
+            send(ID_ZOOM_IN);
             break;
         case WXK_NUMPAD_SUBTRACT:
-            send(ZoomOutID);
+            send(ID_ZOOM_OUT);
             break;
         case 'F':
-            send(ZoomFitID);
+            send(ID_ZOOM_FIT);
             break;
         case 'C':
         case WXK_HOME:
-            send(CenterViewID);
+            send(ID_CENTER_VIEW);
             break;
         case 'G':
-            send(ToggleGridID);
+            send(ID_TOGGLE_GRID);
             break;
         case 'W':
-            send(ToggleWrapID);
+            send(ID_TOGGLE_WRAP);
             break;
         default:
             event.Skip();  // wx then sends the char event that onChar() handles
@@ -474,17 +474,17 @@ void WorldCanvas::onChar(wxKeyEvent& event)
     switch (event.GetUnicodeKey())
     {
         case ']':
-            send(FasterID);
+            send(ID_FASTER);
             break;
         case '[':
-            send(SlowerID);
+            send(ID_SLOWER);
             break;
         case '+':
         case '=':
-            send(ZoomInID);
+            send(ID_ZOOM_IN);
             break;
         case '-':
-            send(ZoomOutID);
+            send(ID_ZOOM_OUT);
             break;
         default:
             event.Skip();
@@ -511,7 +511,7 @@ void WorldCanvas::onThemeChanged(wxSysColourChangedEvent& event)
 
 void WorldCanvas::beginPaint(core::CellPos cell, core::Cell value)
 {
-    m_drag           = Drag::Paint;
+    m_drag           = Drag::PAINT;
     m_strokeValue    = value;
     m_lastStrokeCell = cell;
     CaptureMouse();
@@ -545,7 +545,7 @@ void WorldCanvas::continuePaint(render::PixelPoint devicePoint)
 
 void WorldCanvas::endDrag()
 {
-    m_drag       = Drag::None;
+    m_drag       = Drag::NONE;
     m_dragButton = wxMOUSE_BTN_NONE;
     m_lastStrokeCell.reset();
     // wx asserts when a window is destroyed while it holds the capture, or when a capture is
@@ -573,7 +573,7 @@ void WorldCanvas::viewportChanged()
     setHovered(m_pointer ? m_viewport.cellAt(*m_pointer) : std::nullopt);
     // A stroke goes on from the cell now under the pointer. A line from the last cell would cross
     // cells the pointer never touched.
-    if (m_drag == Drag::Paint)
+    if (m_drag == Drag::PAINT)
     {
         m_lastStrokeCell.reset();
     }

@@ -17,7 +17,7 @@ public:
     /// The UI offers it only up to this size.
     static constexpr CellCount kRecommendedMaxCells = 1'000'000;
 
-    [[nodiscard]] StepperKind kind() const noexcept override { return StepperKind::Reference; }
+    [[nodiscard]] StepperKind kind() const noexcept override { return StepperKind::REFERENCE; }
     CellCount step(const Grid& src, Grid& dst, const Rule& rule, Topology topology) override;
 };
 

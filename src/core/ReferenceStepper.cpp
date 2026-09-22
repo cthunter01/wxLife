@@ -20,13 +20,13 @@ CellCount ReferenceStepper::step(const Grid& src, Grid& dst, const Rule& rule, T
     const auto alive = [&](Coord x, Coord y) -> unsigned {
         switch (topology)
         {
-            case Topology::Bounded:
+            case Topology::BOUNDED:
                 if (!extent.contains({.x = x, .y = y}))
                 {
                     return 0;
                 }
                 break;
-            case Topology::Torus:
+            case Topology::TORUS:
                 // % keeps the sign of x, so -1 needs the extra + width.
                 x = ((x % width) + width) % width;
                 y = ((y % height) + height) % height;

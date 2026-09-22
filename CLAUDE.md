@@ -47,9 +47,10 @@ platforms it supports (`gcc-*` and `headless`: Linux; `clang-*`: Linux and macOS
   `class World` lives in `include/wxLife/core/World.h` and `src/core/World.cpp`. Its tests are in
   `tests/core/WorldTests.cpp`, which includes the header under test first. Tests of anything else are
   `<Name>Tests.cpp` too (`GuiSmokeTests.cpp`)
-- Identifier names are checked by clang-tidy (`readability-identifier-naming` in `.clang-tidy`): types and
-  enumerators `CamelCase`, functions and variables `camelBack`, private and protected members `m_name`, static
-  members and statics `s_name`, constants `kName`. wx command ids end in `ID` (`RunPauseID`)
+- Identifier names are checked by clang-tidy (`readability-identifier-naming` in `.clang-tidy`): types
+  `CamelCase`, enumerators `UPPER_CASE` (`Topology::TORUS`, and the wx command ids `ID_RUN_PAUSE`), functions
+  and variables `camelBack`, private and protected members `m_name`, static members and statics `s_name`,
+  constants `kName`. Avoid enumerators that are macros on some platform, such as `ERROR` (`<windows.h>`)
 - Code lives in `namespace wxLife::<layer>`; project includes use quotes: `#include "wxLife/core/World.h"`
 - No layer includes a layer above it, and `core` and `render` never include wx. The `layering` test checks this
 - Every new target must call `wxLife_configure_target(<target>)`

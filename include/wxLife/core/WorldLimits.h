@@ -17,9 +17,9 @@ inline constexpr Coord kMaxWorldSide = 100'000;
 /// Why validateExtent() rejected an extent.
 enum class ExtentError : std::uint8_t
 {
-    TooSmall,
-    TooLarge,
-    OverMemoryBudget
+    TOO_SMALL,
+    TOO_LARGE,
+    OVER_MEMORY_BUDGET
 };
 
 /// Bytes a World of this extent allocates (two padded grids). @pre 0 <= sides <= kMaxWorldSide

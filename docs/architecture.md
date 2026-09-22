@@ -121,8 +121,8 @@ applies to a cell with *n* live neighbours.
 
 **Automata.** `World::step()` switches on `Automaton`, and the switch has no `default`, so `-Wswitch`
 lists every place a third automaton would need.
-- **`Automaton::Life`** is the path above: refresh the border, run the stepper into `m_next`, swap.
-- **`Automaton::LangtonAnt`** (`wxLife/core/Ant.h`, header-only) moves each ant of `m_ants` once, in
+- **`Automaton::LIFE`** is the path above: refresh the border, run the stepper into `m_next`, swap.
+- **`Automaton::LANGTON_ANT`** (`wxLife/core/Ant.h`, header-only) moves each ant of `m_ants` once, in
   index order, straight on `m_current`. There is no border to refresh and no buffer to swap, and each ant
   therefore sees what the ones before it have just left. One move is: turn right on a dead cell or left
   on a live one, flip that cell, step forward. `advance()` returns the ±1 the population changed by, so
@@ -280,7 +280,7 @@ pressed from the keyboard (except Apply), it gives the focus back to the canvas,
 the clicked control and Space would press that control again.
 
 ```
-[Run] click → wxEVT_BUTTON on the button → emitCommand(RunPauseID)
+[Run] click → wxEVT_BUTTON on the button → emitCommand(ID_RUN_PAUSE)
   → wxEVT_MENU propagates: button → static box → ControlPanel → MainFrame
   → MainFrame::onRunPause → m_runner.toggle() → syncControls() → updateStatusBar(true)
 
@@ -304,7 +304,7 @@ Ctrl+wheel → WorldCanvas::onWheel → Viewport::zoomBy(steps, pointer) → cam
   → viewportChanged() → syncScrollbars(), Refresh(false), m_callbacks.viewChanged
   → MainFrame::onViewChanged → m_panel->setCellSize(), updateStatusBar(true)
 
-G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ToggleGridID)
+G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
   → the same MainFrame::onToggleGrid as the menu item and the check box
 ```
 

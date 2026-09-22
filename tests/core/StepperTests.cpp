@@ -169,7 +169,7 @@ class StepperPatternTest : public testing::TestWithParam<StepperKind>
 {
 protected:
     // `grid` after `generations` steps of Conway's Life.
-    Grid evolve(Grid grid, int generations, Topology topology = Topology::Bounded)
+    Grid evolve(Grid grid, int generations, Topology topology = Topology::BOUNDED)
     {
         for (int g = 0; g < generations; ++g)
         {
@@ -274,7 +274,7 @@ TEST_P(StepperPatternTest, GliderMovesOneCellDiagonallyEveryFourGenerations)
     EXPECT_EQ(evolve(start, 16), place(glider, {12, 10}, {5, 5}));
     // On a torus it crosses the edges and comes back.
     const Grid torusStart = place(glider, {.width = 6, .height = 6}, {.x = 1, .y = 1});
-    EXPECT_EQ(evolve(torusStart, 24, Topology::Torus), torusStart);
+    EXPECT_EQ(evolve(torusStart, 24, Topology::TORUS), torusStart);
 }
 
 TEST_P(StepperPatternTest, GliderHittingABoundedCornerBecomesABlock)
@@ -323,8 +323,8 @@ INSTANTIATE_TEST_SUITE_P(Engines, StepperPatternTest, testing::ValuesIn(kStepper
 
 TEST(StepperTest, KindNames)
 {
-    EXPECT_EQ(toString(StepperKind::Banded), "Banded");
-    EXPECT_EQ(toString(StepperKind::Reference), "Reference");
+    EXPECT_EQ(toString(StepperKind::BANDED), "Banded");
+    EXPECT_EQ(toString(StepperKind::REFERENCE), "Reference");
 }
 
 TEST(StepperTest, ParseKindIgnoresCase)
@@ -333,8 +333,8 @@ TEST(StepperTest, ParseKindIgnoresCase)
     {
         EXPECT_EQ(parseStepperKind(toString(kind)), kind) << toString(kind);
     }
-    EXPECT_EQ(parseStepperKind("banded"), StepperKind::Banded);
-    EXPECT_EQ(parseStepperKind("REFERENCE"), StepperKind::Reference);
+    EXPECT_EQ(parseStepperKind("banded"), StepperKind::BANDED);
+    EXPECT_EQ(parseStepperKind("REFERENCE"), StepperKind::REFERENCE);
     EXPECT_FALSE(parseStepperKind(""));
     EXPECT_FALSE(parseStepperKind("band"));
     EXPECT_FALSE(parseStepperKind("banded "));
@@ -350,7 +350,7 @@ TEST(StepperTest, EmptyGridsStepToEmptyGrids)
               Extent{.width = 3, .height = 0}})
         {
             Grid grid(extent);
-            EXPECT_EQ(stepInPlace(*stepper, grid, Rule::parse("B0/S").value(), Topology::Torus), 0);
+            EXPECT_EQ(stepInPlace(*stepper, grid, Rule::parse("B0/S").value(), Topology::TORUS), 0);
             EXPECT_EQ(grid.extent(), extent);
         }
     }

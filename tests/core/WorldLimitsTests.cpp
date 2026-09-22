@@ -33,11 +33,11 @@ std::string check(Extent e, std::uint64_t budget = 16 * kGiB)
     }
     switch (result.error())
     {
-        case ExtentError::TooSmall:
+        case ExtentError::TOO_SMALL:
             return "TooSmall";
-        case ExtentError::TooLarge:
+        case ExtentError::TOO_LARGE:
             return "TooLarge";
-        case ExtentError::OverMemoryBudget:
+        case ExtentError::OVER_MEMORY_BUDGET:
             return "OverMemoryBudget";
     }
     return "?";
@@ -86,13 +86,13 @@ TEST(WorldLimitsTest, DefaultBudgetIsAQuarterOfRamWithinLimits)
 
 TEST(WorldLimitsTest, Describe)
 {
-    EXPECT_EQ(describe(ExtentError::TooSmall, {0, 5}, 4 * kGiB),
+    EXPECT_EQ(describe(ExtentError::TOO_SMALL, {0, 5}, 4 * kGiB),
               "Width and height must be at least 1.");
-    EXPECT_EQ(describe(ExtentError::TooLarge, {200'000, 5}, 4 * kGiB),
+    EXPECT_EQ(describe(ExtentError::TOO_LARGE, {200'000, 5}, 4 * kGiB),
               "Width and height must be at most 100,000.");
-    EXPECT_EQ(describe(ExtentError::OverMemoryBudget, {50'000, 50'000}, 4 * kGiB),
+    EXPECT_EQ(describe(ExtentError::OVER_MEMORY_BUDGET, {50'000, 50'000}, 4 * kGiB),
               "Needs 4.7 GiB; the limit is 4.0 GiB.");
-    EXPECT_EQ(describe(ExtentError::OverMemoryBudget, {1000, 1000}, 256 * kMiB / 1024),
+    EXPECT_EQ(describe(ExtentError::OVER_MEMORY_BUDGET, {1000, 1000}, 256 * kMiB / 1024),
               "Needs 1.9 MiB; the limit is 256 KiB.");
 }
 

@@ -68,15 +68,15 @@ std::expected<Extent, ExtentError> validateExtent(Extent        e,
 {
     if (e.width < kMinWorldSide || e.height < kMinWorldSide)
     {
-        return std::unexpected(ExtentError::TooSmall);
+        return std::unexpected(ExtentError::TOO_SMALL);
     }
     if (e.width > kMaxWorldSide || e.height > kMaxWorldSide)
     {
-        return std::unexpected(ExtentError::TooLarge);
+        return std::unexpected(ExtentError::TOO_LARGE);
     }
     if (worldBytes(e) > memoryBudgetBytes)
     {
-        return std::unexpected(ExtentError::OverMemoryBudget);
+        return std::unexpected(ExtentError::OVER_MEMORY_BUDGET);
     }
     return e;
 }
@@ -85,11 +85,11 @@ std::string describe(ExtentError error, Extent e, std::uint64_t memoryBudgetByte
 {
     switch (error)
     {
-        case ExtentError::TooSmall:
+        case ExtentError::TOO_SMALL:
             return std::format("Width and height must be at least {}.", formatCount(kMinWorldSide));
-        case ExtentError::TooLarge:
+        case ExtentError::TOO_LARGE:
             return std::format("Width and height must be at most {}.", formatCount(kMaxWorldSide));
-        case ExtentError::OverMemoryBudget:
+        case ExtentError::OVER_MEMORY_BUDGET:
             return std::format("Needs {}; the limit is {}.", formatBytes(worldBytes(e)),
                                formatBytes(memoryBudgetBytes));
     }

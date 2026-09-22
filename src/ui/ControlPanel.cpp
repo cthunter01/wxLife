@@ -120,7 +120,7 @@ void ControlPanel::setAutomaton(core::Automaton automaton)
         core::kAutomata.begin(), std::ranges::find(core::kAutomata, automaton))));
 
     // Each automaton greys out what only the other one uses, so a dead control is visible as such.
-    const bool life = automaton == core::Automaton::Life;
+    const bool life = automaton == core::Automaton::LIFE;
     m_antCount->Enable(!life);
     m_resetAnts->Enable(!life);
     m_wrap->Enable(life);  // the ant always wraps, whatever the topology says
@@ -132,7 +132,7 @@ core::Automaton ControlPanel::selectedAutomaton() const
     const int selection = m_automaton->GetSelection();
     if (selection < 0 || static_cast<std::size_t>(selection) >= core::kAutomata.size())
     {
-        return core::Automaton::Life;
+        return core::Automaton::LIFE;
     }
     return core::kAutomata.at(static_cast<std::size_t>(selection));
 }
@@ -277,14 +277,14 @@ void ControlPanel::addSimulationGroup(wxSizer& column)
     m_antCount->SetToolTip("Ants on the world; each one moves once per generation");
     m_resetAnts = new wxButton(box, wxID_ANY, "Reset");
 
-    sendOn(*m_automaton, wxEVT_CHOICE, AutomatonChangedID);
-    sendOn(*m_runPause, wxEVT_BUTTON, RunPauseID);
-    sendOn(*step, wxEVT_BUTTON, StepID);
-    sendOn(*clear, wxEVT_BUTTON, ClearID);
-    sendOn(*randomize, wxEVT_BUTTON, RandomizeID);
+    sendOn(*m_automaton, wxEVT_CHOICE, ID_AUTOMATON_CHANGED);
+    sendOn(*m_runPause, wxEVT_BUTTON, ID_RUN_PAUSE);
+    sendOn(*step, wxEVT_BUTTON, ID_STEP);
+    sendOn(*clear, wxEVT_BUTTON, ID_CLEAR);
+    sendOn(*randomize, wxEVT_BUTTON, ID_RANDOMIZE);
     // The density sends nothing: the Randomize handler reads it. Changing the count is a reset.
-    sendOn(*m_antCount, wxEVT_SPINCTRL, ResetAntsID);
-    sendOn(*m_resetAnts, wxEVT_BUTTON, ResetAntsID);
+    sendOn(*m_antCount, wxEVT_SPINCTRL, ID_RESET_ANTS);
+    sendOn(*m_resetAnts, wxEVT_BUTTON, ID_RESET_ANTS);
 
     group->Add(m_automaton, rowFlags());
     group->Add(buttonGrid({m_runPause, step, clear, randomize}), rowFlags());
@@ -309,13 +309,13 @@ void ControlPanel::addSpeedGroup(wxSizer& column)
     // The slider and the spin control show the same value; each updates the other before sending.
     m_speedSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
         m_speedSpin->SetValue(core::Speed::fromSliderPosition(m_speedSlider->GetValue()));
-        emitCommand(*m_speedSlider, SpeedChangedID);
+        emitCommand(*m_speedSlider, ID_SPEED_CHANGED);
     });
     m_speedSpin->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
         m_speedSlider->SetValue(core::Speed::toSliderPosition(m_speedSpin->GetValue()));
-        emitCommand(*m_speedSpin, SpeedChangedID);
+        emitCommand(*m_speedSpin, ID_SPEED_CHANGED);
     });
-    sendOn(*m_maxSpeed, wxEVT_CHECKBOX, ToggleMaxSpeedID);
+    sendOn(*m_maxSpeed, wxEVT_CHECKBOX, ID_TOGGLE_MAX_SPEED);
 
     group->Add(stretchRow(m_speedSlider, {m_speedSpin}), rowFlags());
     group->Add(m_maxSpeed, rowFlags());
@@ -340,16 +340,16 @@ void ControlPanel::addViewGroup(wxSizer& column)
     m_cellSizeSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
         m_cellSizeSpin->SetValue(
             render::kZoomSteps.at(static_cast<std::size_t>(m_cellSizeSlider->GetValue())));
-        emitCommand(*m_cellSizeSlider, CellSizeChangedID);
+        emitCommand(*m_cellSizeSlider, ID_CELL_SIZE_CHANGED);
     });
     m_cellSizeSpin->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
         m_cellSizeSlider->SetValue(
             static_cast<int>(render::nearestZoomStep(m_cellSizeSpin->GetValue())));
-        emitCommand(*m_cellSizeSpin, CellSizeChangedID);
+        emitCommand(*m_cellSizeSpin, ID_CELL_SIZE_CHANGED);
     });
-    sendOn(*fit, wxEVT_BUTTON, ZoomFitID);
-    sendOn(*center, wxEVT_BUTTON, CenterViewID);
-    sendOn(*m_showGrid, wxEVT_CHECKBOX, ToggleGridID);
+    sendOn(*fit, wxEVT_BUTTON, ID_ZOOM_FIT);
+    sendOn(*center, wxEVT_BUTTON, ID_CENTER_VIEW);
+    sendOn(*m_showGrid, wxEVT_CHECKBOX, ID_TOGGLE_GRID);
 
     group->Add(
         stretchRow(m_cellSizeSlider, {m_cellSizeSpin, new wxStaticText(box, wxID_ANY, "px")}),
@@ -369,8 +369,8 @@ void ControlPanel::addWorldGroup(wxSizer& column)
     m_wrap       = new wxCheckBox(box, wxID_ANY, "Wrap edges");
     m_wrap->SetToolTip("Opposite edges are neighbours (a torus)");
 
-    sendOn(*resize, wxEVT_BUTTON, WorldSizeID);
-    sendOn(*m_wrap, wxEVT_CHECKBOX, ToggleWrapID);
+    sendOn(*resize, wxEVT_BUTTON, ID_WORLD_SIZE);
+    sendOn(*m_wrap, wxEVT_CHECKBOX, ID_TOGGLE_WRAP);
 
     group->Add(m_worldInfo, rowFlags());
     group->Add(buttonGrid({resize}), rowFlags());
@@ -402,9 +402,9 @@ void ControlPanel::addRuleGroup(wxSizer& column)
     useErrorColour(*m_ruleError);
     m_ruleError->Hide();
 
-    sendOn(*m_rulePreset, wxEVT_CHOICE, RulePresetID);
-    sendOn(*m_ruleText, wxEVT_TEXT_ENTER, ApplyRuleID);
-    sendOn(*apply, wxEVT_BUTTON, ApplyRuleID);
+    sendOn(*m_rulePreset, wxEVT_CHOICE, ID_RULE_PRESET);
+    sendOn(*m_ruleText, wxEVT_TEXT_ENTER, ID_APPLY_RULE);
+    sendOn(*apply, wxEVT_BUTTON, ID_APPLY_RULE);
 
     group->Add(m_rulePreset, rowFlags());
     group->Add(stretchRow(m_ruleText, {apply}), rowFlags());

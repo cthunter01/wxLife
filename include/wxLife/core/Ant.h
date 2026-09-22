@@ -20,26 +20,26 @@ inline constexpr int kMaxAnts = 64;
 /// Which way an ant faces. Clockwise, so a turn is arithmetic on the value.
 enum class Heading : std::uint8_t
 {
-    North,
-    East,
-    South,
-    West
+    NORTH,
+    EAST,
+    SOUTH,
+    WEST
 };
 
 /// Every Heading, so tests cover a new one automatically.
-inline constexpr std::array kHeadings{Heading::North, Heading::East, Heading::South, Heading::West};
+inline constexpr std::array kHeadings{Heading::NORTH, Heading::EAST, Heading::SOUTH, Heading::WEST};
 
 [[nodiscard]] constexpr std::string_view toString(Heading h) noexcept
 {
     switch (h)
     {
-        case Heading::North:
+        case Heading::NORTH:
             return "north";
-        case Heading::East:
+        case Heading::EAST:
             return "east";
-        case Heading::South:
+        case Heading::SOUTH:
             return "south";
-        case Heading::West:
+        case Heading::WEST:
             return "west";
     }
     std::unreachable();
@@ -62,13 +62,13 @@ inline constexpr std::array kHeadings{Heading::North, Heading::East, Heading::So
 {
     switch (h)
     {
-        case Heading::North:
+        case Heading::NORTH:
             return {.x = p.x, .y = p.y > 0 ? p.y - 1 : extent.height - 1};
-        case Heading::East:
+        case Heading::EAST:
             return {.x = p.x + 1 < extent.width ? p.x + 1 : 0, .y = p.y};
-        case Heading::South:
+        case Heading::SOUTH:
             return {.x = p.x, .y = p.y + 1 < extent.height ? p.y + 1 : 0};
-        case Heading::West:
+        case Heading::WEST:
             return {.x = p.x > 0 ? p.x - 1 : extent.width - 1, .y = p.y};
     }
     std::unreachable();
@@ -78,7 +78,7 @@ inline constexpr std::array kHeadings{Heading::North, Heading::East, Heading::So
 struct Ant
 {
     CellPos position{};
-    Heading heading = Heading::North;
+    Heading heading = Heading::NORTH;
 
     friend constexpr bool operator==(Ant, Ant) noexcept = default;
 };
@@ -90,7 +90,7 @@ struct Ant
 {
     // 64-bit before the cast, so the widest world cannot overflow.
     const auto x = static_cast<Coord>(CellCount{extent.width} * (index + 1) / (count + 1));
-    return {.position = {.x = x, .y = extent.height / 2}, .heading = Heading::North};
+    return {.position = {.x = x, .y = extent.height / 2}, .heading = Heading::NORTH};
 }
 
 /// One move: on a dead cell the ant turns right, on a live one left; then it flips the cell and

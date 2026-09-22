@@ -66,9 +66,9 @@ public:
 private:
     enum class Drag : std::uint8_t
     {
-        None,
-        Paint,
-        Pan
+        NONE,
+        PAINT,
+        PAN
     };
 
     void onPaint(wxPaintEvent& event);
@@ -104,7 +104,7 @@ private:
     render::Rasterizer  m_rasterizer;
     render::PixelBuffer m_frame;
 
-    Drag       m_drag        = Drag::None;
+    Drag       m_drag        = Drag::NONE;
     int        m_dragButton  = wxMOUSE_BTN_NONE;  ///< Only this button's release ends the drag.
     core::Cell m_strokeValue = core::kAlive;
     /// nullopt: the next motion starts a new segment.

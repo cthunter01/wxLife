@@ -41,17 +41,17 @@ static_assert(parsesTo("/3", 0b1000, 0));
 static_assert(parsesTo("B012345678/S012345678", 0x1FF, 0x1FF));
 static_assert(parsesTo("B0/S8", 0b1, 0b1'0000'0000));
 
-static_assert(failsWith("", RuleError::Empty));
-static_assert(failsWith(" \t ", RuleError::Empty));
-static_assert(failsWith("B9", RuleError::NeighbourOutOfRange));
-static_assert(failsWith("23/9", RuleError::NeighbourOutOfRange));
-static_assert(failsWith("B3/B4", RuleError::Syntax));
-static_assert(failsWith("B3/S23/", RuleError::Syntax));
-static_assert(failsWith("X3/S2", RuleError::Syntax));
-static_assert(failsWith("B3/", RuleError::Syntax));
-static_assert(failsWith("B3 /S23", RuleError::Syntax));
-static_assert(failsWith("23", RuleError::Syntax));  // the legacy form needs its slash
-static_assert(failsWith("23/3/", RuleError::Syntax));
+static_assert(failsWith("", RuleError::EMPTY));
+static_assert(failsWith(" \t ", RuleError::EMPTY));
+static_assert(failsWith("B9", RuleError::NEIGHBOUR_OUT_OF_RANGE));
+static_assert(failsWith("23/9", RuleError::NEIGHBOUR_OUT_OF_RANGE));
+static_assert(failsWith("B3/B4", RuleError::SYNTAX));
+static_assert(failsWith("B3/S23/", RuleError::SYNTAX));
+static_assert(failsWith("X3/S2", RuleError::SYNTAX));
+static_assert(failsWith("B3/", RuleError::SYNTAX));
+static_assert(failsWith("B3 /S23", RuleError::SYNTAX));
+static_assert(failsWith("23", RuleError::SYNTAX));  // the legacy form needs its slash
+static_assert(failsWith("23/3/", RuleError::SYNTAX));
 
 static_assert(Rule{0xFFFF, 0xFFFF} == Rule{0x1FF, 0x1FF});
 static_assert(kRulePresets[findPreset(Rule{}).value()].name == "Conway's Life");
@@ -78,19 +78,19 @@ TEST(RuleTest, AcceptsTheCommonForms)
 
 TEST(RuleTest, ReportsEachError)
 {
-    EXPECT_EQ(parsed(""), describe(RuleError::Empty));
-    EXPECT_EQ(parsed("   "), describe(RuleError::Empty));
-    EXPECT_EQ(parsed("B9"), describe(RuleError::NeighbourOutOfRange));
-    EXPECT_EQ(parsed("B3/B4"), describe(RuleError::Syntax));
-    EXPECT_EQ(parsed("B3/S23/"), describe(RuleError::Syntax));
-    EXPECT_EQ(parsed("X3/S2"), describe(RuleError::Syntax));
+    EXPECT_EQ(parsed(""), describe(RuleError::EMPTY));
+    EXPECT_EQ(parsed("   "), describe(RuleError::EMPTY));
+    EXPECT_EQ(parsed("B9"), describe(RuleError::NEIGHBOUR_OUT_OF_RANGE));
+    EXPECT_EQ(parsed("B3/B4"), describe(RuleError::SYNTAX));
+    EXPECT_EQ(parsed("B3/S23/"), describe(RuleError::SYNTAX));
+    EXPECT_EQ(parsed("X3/S2"), describe(RuleError::SYNTAX));
 }
 
 TEST(RuleTest, DescribesEachError)
 {
-    EXPECT_EQ(describe(RuleError::Empty), "Enter a rule such as B3/S23.");
-    EXPECT_EQ(describe(RuleError::Syntax), "Rules look like B3/S23: digits after B and S.");
-    EXPECT_EQ(describe(RuleError::NeighbourOutOfRange), "Neighbour counts go from 0 to 8.");
+    EXPECT_EQ(describe(RuleError::EMPTY), "Enter a rule such as B3/S23.");
+    EXPECT_EQ(describe(RuleError::SYNTAX), "Rules look like B3/S23: digits after B and S.");
+    EXPECT_EQ(describe(RuleError::NEIGHBOUR_OUT_OF_RANGE), "Neighbour counts go from 0 to 8.");
 }
 
 TEST(RuleTest, ToStringIsCanonical)

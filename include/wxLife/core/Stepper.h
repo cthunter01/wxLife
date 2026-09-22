@@ -17,20 +17,20 @@ namespace wxLife::core
 /// The engines makeStepper() can build.
 enum class StepperKind : std::uint8_t
 {
-    Banded,
-    Reference
+    BANDED,
+    REFERENCE
 };
 
 /// Every StepperKind, for menus, command-line parsers and tests.
-inline constexpr std::array kStepperKinds{StepperKind::Banded, StepperKind::Reference};
+inline constexpr std::array kStepperKinds{StepperKind::BANDED, StepperKind::REFERENCE};
 
 [[nodiscard]] constexpr std::string_view toString(StepperKind kind) noexcept
 {
     switch (kind)
     {
-        case StepperKind::Banded:
+        case StepperKind::BANDED:
             return "Banded";
-        case StepperKind::Reference:
+        case StepperKind::REFERENCE:
             return "Reference";
     }
     std::unreachable();

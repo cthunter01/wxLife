@@ -57,18 +57,18 @@ const Pattern kGlider = {
 
 TEST(WorldTest, StartsEmptyWithTheGivenSettings)
 {
-    const World world({.width = 7, .height = 5}, Rule::parse("B36/S23").value(), Topology::Bounded);
+    const World world({.width = 7, .height = 5}, Rule::parse("B36/S23").value(), Topology::BOUNDED);
     EXPECT_EQ(world.extent(), (Extent{7, 5}));
     EXPECT_EQ(world.cells().extent(), (Extent{7, 5}));
     EXPECT_EQ(world.rule().toString(), "B36/S23");
-    EXPECT_EQ(world.topology(), Topology::Bounded);
-    EXPECT_EQ(world.stepper().kind(), StepperKind::Banded);
+    EXPECT_EQ(world.topology(), Topology::BOUNDED);
+    EXPECT_EQ(world.stepper().kind(), StepperKind::BANDED);
     EXPECT_EQ(world.generation(), 0U);
     EXPECT_EQ(world.population(), 0);
 
     const World defaults({.width = 1, .height = 1});
     EXPECT_EQ(defaults.rule().toString(), "B3/S23");
-    EXPECT_EQ(defaults.topology(), Topology::Torus);
+    EXPECT_EQ(defaults.topology(), Topology::TORUS);
 }
 
 TEST(WorldTest, GliderOnATorusReturnsHome)
@@ -94,8 +94,8 @@ TEST(WorldTest, OnlyStepAdvancesTheGeneration)
 
     world.setCell({.x = 1, .y = 1}, kAlive);
     world.setRule(Rule::parse("B36/S23").value());
-    world.setTopology(Topology::Bounded);
-    world.setStepper(makeStepper(StepperKind::Reference));
+    world.setTopology(Topology::BOUNDED);
+    world.setStepper(makeStepper(StepperKind::REFERENCE));
     world.resize({.width = 12, .height = 9}, true);
     EXPECT_EQ(world.generation(), 2U);
 }
@@ -474,7 +474,7 @@ TEST(WorldTest, SetTopologyChangesTheNextStep)
         "OOO",
         "...",
     };
-    World world({.width = 3, .height = 3}, Rule{}, Topology::Bounded);
+    World world({.width = 3, .height = 3}, Rule{}, Topology::BOUNDED);
     draw(world, row);
     world.step();
     EXPECT_EQ(toAscii(world.cells()),
@@ -484,8 +484,8 @@ TEST(WorldTest, SetTopologyChangesTheNextStep)
 
     world.clear();
     draw(world, row);
-    world.setTopology(Topology::Torus);
-    EXPECT_EQ(world.topology(), Topology::Torus);
+    world.setTopology(Topology::TORUS);
+    EXPECT_EQ(world.topology(), Topology::TORUS);
     world.step();
     EXPECT_EQ(toAscii(world.cells()),
               "OOO\n"
@@ -512,7 +512,7 @@ TEST(WorldTest, SetStepperKeepsTheState)
     const CellCount population = reference.population();
 
     reference.setStepper(std::make_unique<ReferenceStepper>());
-    EXPECT_EQ(reference.stepper().kind(), StepperKind::Reference);
+    EXPECT_EQ(reference.stepper().kind(), StepperKind::REFERENCE);
     EXPECT_EQ(reference.cells(), before);
     EXPECT_EQ(reference.population(), population);
     EXPECT_EQ(reference.generation(), 5U);
@@ -532,17 +532,17 @@ TEST(WorldTest, SetStepperKeepsTheState)
 TEST(WorldTest, TheAntModeMovesEveryAntOncePerGeneration)
 {
     World world({.width = 10, .height = 10});
-    world.setAutomaton(Automaton::LangtonAnt);
-    world.setAnts(std::vector<Ant>{{.position = {.x = 2, .y = 2}, .heading = Heading::North},
-                                   {.position = {.x = 7, .y = 7}, .heading = Heading::South}});
+    world.setAutomaton(Automaton::LANGTON_ANT);
+    world.setAnts(std::vector<Ant>{{.position = {.x = 2, .y = 2}, .heading = Heading::NORTH},
+                                   {.position = {.x = 7, .y = 7}, .heading = Heading::SOUTH}});
 
     world.step();
     EXPECT_EQ(world.generation(), 1U);
     EXPECT_EQ(world.population(), 2);  // each ant lit the cell it stood on
     EXPECT_EQ(world.at({2, 2}), kAlive);
     EXPECT_EQ(world.at({7, 7}), kAlive);
-    EXPECT_EQ(world.ants()[0], (Ant{{3, 2}, Heading::East}));
-    EXPECT_EQ(world.ants()[1], (Ant{{6, 7}, Heading::West}));
+    EXPECT_EQ(world.ants()[0], (Ant{{3, 2}, Heading::EAST}));
+    EXPECT_EQ(world.ants()[1], (Ant{{6, 7}, Heading::WEST}));
     EXPECT_EQ(world.population(), world.cells().countAlive());
 }
 
@@ -550,15 +550,15 @@ TEST(WorldTest, AntsShareTheGridInIndexOrder)
 {
     // Both ants start on the same dead cell, so the first lights it and the second finds it alight.
     World world({.width = 9, .height = 9});
-    world.setAutomaton(Automaton::LangtonAnt);
-    world.setAnts(std::vector<Ant>{{.position = {.x = 4, .y = 4}, .heading = Heading::North},
-                                   {.position = {.x = 4, .y = 4}, .heading = Heading::North}});
+    world.setAutomaton(Automaton::LANGTON_ANT);
+    world.setAnts(std::vector<Ant>{{.position = {.x = 4, .y = 4}, .heading = Heading::NORTH},
+                                   {.position = {.x = 4, .y = 4}, .heading = Heading::NORTH}});
 
     world.step();
     EXPECT_EQ(world.at({4, 4}), kDead);
     EXPECT_EQ(world.population(), 0);
-    EXPECT_EQ(world.ants()[0], (Ant{{5, 4}, Heading::East}));  // turned right on a dead cell
-    EXPECT_EQ(world.ants()[1], (Ant{{3, 4}, Heading::West}));  // turned left on a live one
+    EXPECT_EQ(world.ants()[0], (Ant{{5, 4}, Heading::EAST}));  // turned right on a dead cell
+    EXPECT_EQ(world.ants()[1], (Ant{{3, 4}, Heading::WEST}));  // turned left on a live one
 }
 
 TEST(WorldTest, TheAntAlwaysWrapsWhateverTheTopology)
@@ -567,13 +567,13 @@ TEST(WorldTest, TheAntAlwaysWrapsWhateverTheTopology)
     {
         SCOPED_TRACE(toString(topology));
         World world({.width = 4, .height = 4}, Rule{}, topology);
-        world.setAutomaton(Automaton::LangtonAnt);
+        world.setAutomaton(Automaton::LANGTON_ANT);
         world.setAnts(
             std::vector<Ant>{{.position = {.x = 0, .y = 0},
-                              .heading  = Heading::West}});  // turns right to north, off the top
+                              .heading  = Heading::WEST}});  // turns right to north, off the top
 
         world.step();
-        EXPECT_EQ(world.ants()[0], (Ant{{0, 3}, Heading::North}));
+        EXPECT_EQ(world.ants()[0], (Ant{{0, 3}, Heading::NORTH}));
         EXPECT_EQ(world.at({0, 0}), kAlive);
     }
 }
@@ -583,18 +583,18 @@ TEST(WorldTest, SwitchingAutomatonKeepsTheCellsAndSeedsAnAnt)
     World world({.width = 9, .height = 7});
     draw(world, kGlider, {.x = 1, .y = 1});
     const Grid before = world.cells();
-    EXPECT_EQ(world.automaton(), Automaton::Life);
+    EXPECT_EQ(world.automaton(), Automaton::LIFE);
     EXPECT_TRUE(world.ants().empty());
 
-    world.setAutomaton(Automaton::LangtonAnt);
-    EXPECT_EQ(world.automaton(), Automaton::LangtonAnt);
+    world.setAutomaton(Automaton::LANGTON_ANT);
+    EXPECT_EQ(world.automaton(), Automaton::LANGTON_ANT);
     EXPECT_EQ(world.cells(), before);
     ASSERT_EQ(world.ants().size(), 1U);
     EXPECT_EQ(world.ants()[0], defaultAnt(0, 1, world.extent()));
 
     world.step();
     const Ant moved = world.ants()[0];
-    world.setAutomaton(Automaton::Life);  // the ant is kept, and a Life step leaves it alone
+    world.setAutomaton(Automaton::LIFE);  // the ant is kept, and a Life step leaves it alone
     ASSERT_EQ(world.ants().size(), 1U);
     EXPECT_EQ(world.ants()[0], moved);
     world.step();
@@ -604,7 +604,7 @@ TEST(WorldTest, SwitchingAutomatonKeepsTheCellsAndSeedsAnAnt)
 TEST(WorldTest, ClearAndRandomizePutTheAntsBack)
 {
     World world({.width = 20, .height = 12});
-    world.setAutomaton(Automaton::LangtonAnt);
+    world.setAutomaton(Automaton::LANGTON_ANT);
     world.resetAnts(3);
     const std::vector<Ant> start(world.ants().begin(), world.ants().end());
     ASSERT_EQ(start.size(), 3U);
@@ -631,16 +631,16 @@ TEST(WorldTest, ClearAndRandomizePutTheAntsBack)
 TEST(WorldTest, ResizeMovesTheAntsWithThePattern)
 {
     World world({.width = 4, .height = 4});
-    world.setAutomaton(Automaton::LangtonAnt);
-    world.setAnts(std::vector<Ant>{{.position = {.x = 1, .y = 1}, .heading = Heading::East}});
+    world.setAutomaton(Automaton::LANGTON_ANT);
+    world.setAnts(std::vector<Ant>{{.position = {.x = 1, .y = 1}, .heading = Heading::EAST}});
 
     world.resize({.width = 8, .height = 8}, true);  // offset ((8 - 4) / 2, (8 - 4) / 2) = (2, 2)
-    EXPECT_EQ(world.ants()[0], (Ant{{3, 3}, Heading::East}));
+    EXPECT_EQ(world.ants()[0], (Ant{{3, 3}, Heading::EAST}));
     world.resize({.width = 4, .height = 4}, true);
-    EXPECT_EQ(world.ants()[0], (Ant{{1, 1}, Heading::East}));
+    EXPECT_EQ(world.ants()[0], (Ant{{1, 1}, Heading::EAST}));
 
     // A world that cropped an ant pulls it back to the nearest edge.
-    world.setAnts(std::vector<Ant>{{.position = {.x = 3, .y = 3}, .heading = Heading::North}});
+    world.setAnts(std::vector<Ant>{{.position = {.x = 3, .y = 3}, .heading = Heading::NORTH}});
     world.resize({.width = 2, .height = 2}, true);  // offset (-1, -1)
     EXPECT_EQ(world.ants()[0].position, (CellPos{1, 1}));
     EXPECT_TRUE(world.extent().contains(world.ants()[0].position));
@@ -654,7 +654,7 @@ TEST(WorldTest, ToggleAntAtAddsAndRemoves)
     World world({.width = 6, .height = 6});
     EXPECT_TRUE(world.toggleAntAt({2, 3}));
     ASSERT_EQ(world.ants().size(), 1U);
-    EXPECT_EQ(world.ants()[0], (Ant{{2, 3}, Heading::North}));
+    EXPECT_EQ(world.ants()[0], (Ant{{2, 3}, Heading::NORTH}));
 
     EXPECT_FALSE(world.toggleAntAt({2, 3}));
     EXPECT_TRUE(world.ants().empty());
@@ -685,7 +685,7 @@ TEST(WorldTest, TheAntBuildsTheKnownHighway)
 
     // Wide enough that the ant never reaches an edge here, so wrapping cannot disturb the pattern.
     World world({.width = 128, .height = 128});
-    world.setAutomaton(Automaton::LangtonAnt);
+    world.setAutomaton(Automaton::LANGTON_ANT);
     const CellPos start = world.ants()[0].position;
     const auto    run   = [&](int moves) {
         for (int i = 0; i < moves; ++i)
@@ -696,7 +696,7 @@ TEST(WorldTest, TheAntBuildsTheKnownHighway)
 
     run(kChaos);
     EXPECT_EQ(world.population(), 715);
-    EXPECT_EQ(world.ants()[0], (Ant{{start.x - 15, start.y - 10}, Heading::West}));
+    EXPECT_EQ(world.ants()[0], (Ant{{start.x - 15, start.y - 10}, Heading::WEST}));
 
     for (int period = 0; period < 10; ++period)
     {

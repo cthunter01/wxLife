@@ -19,20 +19,20 @@ inline constexpr Cell kAlive = 1;
 /// -Wswitch lists every place there that a new topology needs.
 enum class Topology : std::uint8_t
 {
-    Bounded,  ///< Cells beyond the edge are always dead.
-    Torus,    ///< Opposite edges are neighbours.
+    BOUNDED,  ///< Cells beyond the edge are always dead.
+    TORUS,    ///< Opposite edges are neighbours.
 };
 
 /// Every Topology, so tests cover a new one automatically.
-inline constexpr std::array kTopologies{Topology::Bounded, Topology::Torus};
+inline constexpr std::array kTopologies{Topology::BOUNDED, Topology::TORUS};
 
 [[nodiscard]] constexpr std::string_view toString(Topology t) noexcept
 {
     switch (t)
     {
-        case Topology::Bounded:
+        case Topology::BOUNDED:
             return "bounded";
-        case Topology::Torus:
+        case Topology::TORUS:
             return "torus";
     }
     std::unreachable();
@@ -42,20 +42,20 @@ inline constexpr std::array kTopologies{Topology::Bounded, Topology::Torus};
 /// -Wswitch lists every place there that a new automaton needs.
 enum class Automaton : std::uint8_t
 {
-    Life,        ///< A two-state B/S rule, stepped by a Stepper.
-    LangtonAnt,  ///< Langton's ant: the cells are its tape, and the ants are the only movers.
+    LIFE,         ///< A two-state B/S rule, stepped by a Stepper.
+    LANGTON_ANT,  ///< Langton's ant: the cells are its tape, and the ants are the only movers.
 };
 
 /// Every Automaton, so tests cover a new one automatically.
-inline constexpr std::array kAutomata{Automaton::Life, Automaton::LangtonAnt};
+inline constexpr std::array kAutomata{Automaton::LIFE, Automaton::LANGTON_ANT};
 
 [[nodiscard]] constexpr std::string_view toString(Automaton a) noexcept
 {
     switch (a)
     {
-        case Automaton::Life:
+        case Automaton::LIFE:
             return "Life";
-        case Automaton::LangtonAnt:
+        case Automaton::LANGTON_ANT:
             return "Langton's ant";
     }
     std::unreachable();

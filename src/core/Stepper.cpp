@@ -32,9 +32,9 @@ std::unique_ptr<Stepper> makeStepper(StepperKind kind, unsigned maxThreads)
 {
     switch (kind)
     {
-        case StepperKind::Banded:
+        case StepperKind::BANDED:
             return std::make_unique<BandedStepper>(maxThreads);
-        case StepperKind::Reference:
+        case StepperKind::REFERENCE:
             return std::make_unique<ReferenceStepper>();
     }
     std::unreachable();

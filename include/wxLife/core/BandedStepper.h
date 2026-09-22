@@ -21,7 +21,7 @@ public:
     explicit BandedStepper(unsigned  maxThreads      = 0,
                            CellCount minCellsPerBand = kMinCellsPerBand) noexcept;
 
-    [[nodiscard]] StepperKind kind() const noexcept override { return StepperKind::Banded; }
+    [[nodiscard]] StepperKind kind() const noexcept override { return StepperKind::BANDED; }
     CellCount step(const Grid& src, Grid& dst, const Rule& rule, Topology topology) override;
 
 private:

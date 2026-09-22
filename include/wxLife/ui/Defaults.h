@@ -10,7 +10,7 @@ namespace wxLife::ui::defaults
 {
 
 inline constexpr core::Extent   kWorldExtent{.width = 512, .height = 512};
-inline constexpr core::Topology kTopology = core::Topology::Torus;
+inline constexpr core::Topology kTopology = core::Topology::TORUS;
 inline constexpr core::Speed    kSpeed{.gensPerSecond = 30};
 inline constexpr int            kCellSize             = 4;  ///< Used until the first fit.
 inline constexpr bool           kShowGrid             = true;

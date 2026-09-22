@@ -126,9 +126,9 @@ WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::E
         this, wxID_ANY, toWx(memoryText(core::formatBytes(core::worldBytes(largest)), m_budget)));
     const std::array<std::string, 4> errors{
         std::string(kNotWholeNumbers),
-        core::describe(core::ExtentError::TooSmall, largest, m_budget),
-        core::describe(core::ExtentError::TooLarge, largest, m_budget),
-        core::describe(core::ExtentError::OverMemoryBudget, largest, m_budget)};
+        core::describe(core::ExtentError::TOO_SMALL, largest, m_budget),
+        core::describe(core::ExtentError::TOO_LARGE, largest, m_budget),
+        core::describe(core::ExtentError::OVER_MEMORY_BUDGET, largest, m_budget)};
     const auto textWidth = [this](const std::string& text) { return GetTextExtent(toWx(text)).x; };
     m_error = new wxStaticText(this, wxID_ANY, toWx(std::ranges::max(errors, {}, textWidth)));
     useErrorColour(*m_error);

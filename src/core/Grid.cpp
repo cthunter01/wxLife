@@ -69,12 +69,12 @@ void Grid::updateBorder(Topology topology) noexcept
     // An empty grid has no opposite edge to copy from.
     if (m_extent.cellCount() == 0)
     {
-        topology = Topology::Bounded;
+        topology = Topology::BOUNDED;
     }
 
     switch (topology)
     {
-        case Topology::Bounded:
+        case Topology::BOUNDED:
             std::ranges::fill(paddedRowAt(0), kDead);
             std::ranges::fill(paddedRowAt(height + 1), kDead);
             for (std::size_t y = 1; y <= height; ++y)
@@ -85,7 +85,7 @@ void Grid::updateBorder(Topology topology) noexcept
                 padded.back()  = kDead;
             }
             break;
-        case Topology::Torus:
+        case Topology::TORUS:
             // Wrap the columns of every interior row first; the whole-row copies below then carry
             // those ghost cells along, which is what makes the four corners correct.
             for (std::size_t y = 1; y <= height; ++y)

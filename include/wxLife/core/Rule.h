@@ -19,9 +19,9 @@ namespace wxLife::core
 /// Why Rule::parse() rejected a text.
 enum class RuleError : std::uint8_t
 {
-    Empty,
-    Syntax,
-    NeighbourOutOfRange
+    EMPTY,
+    SYNTAX,
+    NEIGHBOUR_OUT_OF_RANGE
 };
 
 /// Message for the user.
@@ -29,11 +29,11 @@ enum class RuleError : std::uint8_t
 {
     switch (e)
     {
-        case RuleError::Empty:
+        case RuleError::EMPTY:
             return "Enter a rule such as B3/S23.";
-        case RuleError::Syntax:
+        case RuleError::SYNTAX:
             return "Rules look like B3/S23: digits after B and S.";
-        case RuleError::NeighbourOutOfRange:
+        case RuleError::NEIGHBOUR_OUT_OF_RANGE:
             return "Neighbour counts go from 0 to 8.";
     }
     std::unreachable();
@@ -98,7 +98,7 @@ constexpr std::expected<Rule, RuleError> Rule::parse(std::string_view text) noex
     const std::size_t          first  = text.find_first_not_of(kSpace);
     if (first == std::string_view::npos)
     {
-        return std::unexpected(RuleError::Empty);
+        return std::unexpected(RuleError::EMPTY);
     }
     text = text.substr(first, text.find_last_not_of(kSpace) + 1 - first);
 
@@ -124,7 +124,7 @@ constexpr std::expected<Rule, RuleError> Rule::parse(std::string_view text) noex
         }
         else if (c == '9')
         {
-            return std::unexpected(RuleError::NeighbourOutOfRange);
+            return std::unexpected(RuleError::NEIGHBOUR_OUT_OF_RANGE);
         }
         else if (c == '/')
         {
@@ -132,7 +132,7 @@ constexpr std::expected<Rule, RuleError> Rule::parse(std::string_view text) noex
             const bool beforeLetter = i + 1 < text.size() && isLetter(text[i + 1]);
             if (seenSlash || (!legacy && !beforeLetter))
             {
-                return std::unexpected(RuleError::Syntax);
+                return std::unexpected(RuleError::SYNTAX);
             }
             seenSlash = true;
             if (legacy)
@@ -152,12 +152,12 @@ constexpr std::expected<Rule, RuleError> Rule::parse(std::string_view text) noex
         }
         else
         {
-            return std::unexpected(RuleError::Syntax);
+            return std::unexpected(RuleError::SYNTAX);
         }
     }
     if (legacy && !seenSlash)  // "23" alone is ambiguous
     {
-        return std::unexpected(RuleError::Syntax);
+        return std::unexpected(RuleError::SYNTAX);
     }
     return Rule{birth, survival};
 }

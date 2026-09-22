@@ -76,7 +76,7 @@ TEST(GridTest, DefaultGridIsEmpty)
     EXPECT_EQ(grid.countAlive(), 0);
     EXPECT_EQ(grid.paddedRow(-1).size(), 2U);
     EXPECT_EQ(grid.paddedRow(0).size(), 2U);
-    grid.updateBorder(Topology::Torus);  // nothing to wrap: the ghost cells stay dead
+    grid.updateBorder(Topology::TORUS);  // nothing to wrap: the ghost cells stay dead
     EXPECT_TRUE(borderIsDead(grid));
     EXPECT_EQ(grid, Grid({0, 0}));
 }
@@ -124,9 +124,9 @@ TEST(GridTest, BoundedBorderIsDeadEvenAfterATorusRefresh)
     {
         std::ranges::fill(grid.row(y), kAlive);
     }
-    grid.updateBorder(Topology::Torus);
+    grid.updateBorder(Topology::TORUS);
     EXPECT_FALSE(borderIsDead(grid));
-    grid.updateBorder(Topology::Bounded);
+    grid.updateBorder(Topology::BOUNDED);
     EXPECT_TRUE(borderIsDead(grid));
     EXPECT_EQ(grid.countAlive(), 12);
 }
@@ -135,7 +135,7 @@ TEST(GridTest, TorusBorderCopiesTheOppositeCorner)
 {
     Grid grid({.width = 5, .height = 4});
     grid.set({.x = 4, .y = 3}, kAlive);  // bottom-right
-    grid.updateBorder(Topology::Torus);
+    grid.updateBorder(Topology::TORUS);
     EXPECT_EQ(padded(grid, -1, -1), kAlive);  // top-left ghost
     EXPECT_EQ(padded(grid, 4, -1), kAlive);   // above the cell
     EXPECT_EQ(padded(grid, -1, 3), kAlive);   // left of row 3
@@ -143,18 +143,18 @@ TEST(GridTest, TorusBorderCopiesTheOppositeCorner)
 
     grid.clear();
     grid.set({.x = 0, .y = 0}, kAlive);  // top-left
-    grid.updateBorder(Topology::Torus);
+    grid.updateBorder(Topology::TORUS);
     EXPECT_EQ(padded(grid, 5, 4), kAlive);  // bottom-right ghost
     EXPECT_EQ(padded(grid, -1, -1), kDead);
 
     grid.clear();
     grid.set({.x = 0, .y = 3}, kAlive);  // bottom-left
-    grid.updateBorder(Topology::Torus);
+    grid.updateBorder(Topology::TORUS);
     EXPECT_EQ(padded(grid, 5, -1), kAlive);  // top-right ghost
 
     grid.clear();
     grid.set({.x = 4, .y = 0}, kAlive);  // top-right
-    grid.updateBorder(Topology::Torus);
+    grid.updateBorder(Topology::TORUS);
     EXPECT_EQ(padded(grid, -1, 4), kAlive);  // bottom-left ghost
 }
 
@@ -171,7 +171,7 @@ TEST_P(GridTorusTest, EveryGhostCellCopiesTheWrappedCell)
         {
             Grid grid(extent);
             grid.set({.x = x, .y = y}, kAlive);
-            grid.updateBorder(Topology::Torus);
+            grid.updateBorder(Topology::TORUS);
             EXPECT_TRUE(borderWrapsAround(grid)) << "live cell (" << x << ", " << y << ")";
         }
     }
@@ -192,7 +192,7 @@ TEST(GridTest, CountAliveIgnoresTheBorder)
         "....",
         "O..O",
     });
-    grid.updateBorder(Topology::Torus);  // the corners are now copied many times
+    grid.updateBorder(Topology::TORUS);  // the corners are now copied many times
     EXPECT_EQ(grid.countAlive(), 4);
 }
 
@@ -200,7 +200,7 @@ TEST(GridTest, EqualityComparesExtentAndInterior)
 {
     Grid       a = gridFromAscii({".O", "O."});
     const Grid b = gridFromAscii({".O", "O."});
-    a.updateBorder(Topology::Torus);  // only the ghost cells differ now
+    a.updateBorder(Topology::TORUS);  // only the ghost cells differ now
     EXPECT_EQ(a, b);
     EXPECT_NE(a, gridFromAscii({".O", "OO"}));
     EXPECT_NE(gridFromAscii({"..", ".."}), gridFromAscii({"...."}));
@@ -213,7 +213,7 @@ TEST(GridTest, ClearKillsBorderToo)
         "OO",
         "OO",
     });
-    grid.updateBorder(Topology::Torus);
+    grid.updateBorder(Topology::TORUS);
     grid.clear();
     EXPECT_EQ(grid.countAlive(), 0);
     EXPECT_TRUE(borderIsDead(grid));

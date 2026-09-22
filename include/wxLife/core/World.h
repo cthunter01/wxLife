@@ -24,7 +24,7 @@ class World
 {
 public:
     /// Uses a BandedStepper. @pre validateExtent(extent, ...) succeeded. @throws std::bad_alloc
-    explicit World(Extent extent, Rule rule = {}, Topology topology = Topology::Torus);
+    explicit World(Extent extent, Rule rule = {}, Topology topology = Topology::TORUS);
 
     [[nodiscard]] Extent      extent() const noexcept;
     [[nodiscard]] const Grid& cells() const noexcept;
@@ -87,7 +87,7 @@ private:
     Grid                     m_next;  ///< Only Life steps into it; the ants use m_current alone.
     Rule                     m_rule;
     Topology                 m_topology;
-    Automaton                m_automaton = Automaton::Life;
+    Automaton                m_automaton = Automaton::LIFE;
     std::vector<Ant>         m_ants;
     std::unique_ptr<Stepper> m_stepper;
     std::uint64_t            m_generation = 0;

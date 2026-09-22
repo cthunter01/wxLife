@@ -47,9 +47,9 @@ struct Options
     unsigned    threads     = 0;  // at most this many threads; 0 = hardware concurrency
     unsigned    bands       = 0;  // exactly this many bands (Banded only); 0 = automatic
     int         generations = 100;
-    StepperKind engine      = StepperKind::Banded;
+    StepperKind engine      = StepperKind::BANDED;
     Rule        rule;
-    Topology    topology = Topology::Torus;
+    Topology    topology = Topology::TORUS;
 };
 
 // {0}: the engine names, {1}: kMinCellsPerBand.
@@ -131,9 +131,9 @@ std::optional<Extent> parseSize(std::string_view text)
 
 enum class Parsed : std::uint8_t
 {
-    Run,
-    Help,
-    Error
+    RUN,
+    HELP,
+    INVALID  // not ERROR, which <windows.h> defines as a macro
 };
 
 // Stores the value of option `name` in `options`. Returns false after printing the problem when the
@@ -175,7 +175,7 @@ bool applyOption(std::string_view name, std::string_view value, Options& options
     {
         const auto engine = parseStepperKind(value);
         ok                = engine.has_value();
-        options.engine    = engine.value_or(StepperKind::Banded);
+        options.engine    = engine.value_or(StepperKind::BANDED);
     }
     else if (name == "--rule")
     {
@@ -210,31 +210,31 @@ Parsed parseArguments(std::span<char*> args, Options& options)
         const std::string_view name = args[i];
         if (name == "--bounded")
         {
-            options.topology = Topology::Bounded;
+            options.topology = Topology::BOUNDED;
             continue;
         }
         if (name == "--help" || name == "-h")
         {
             printUsage(stdout);
-            return Parsed::Help;
+            return Parsed::HELP;
         }
         if (i + 1 == args.size())
         {
             std::println(stderr, "{} needs a value", name);
             printUsage(stderr);
-            return Parsed::Error;
+            return Parsed::INVALID;
         }
         if (!applyOption(name, args[++i], options))
         {
-            return Parsed::Error;
+            return Parsed::INVALID;
         }
     }
-    if (options.bands > 0 && options.engine != StepperKind::Banded)
+    if (options.bands > 0 && options.engine != StepperKind::BANDED)
     {
         std::println(stderr, "--bands works only with --engine banded");
-        return Parsed::Error;
+        return Parsed::INVALID;
     }
-    return Parsed::Run;
+    return Parsed::RUN;
 }
 
 std::unique_ptr<Stepper> makeEngine(const Options& options)
@@ -252,14 +252,14 @@ unsigned bandCount(const Options& options)
     const CellCount cells = options.size.cellCount();
     switch (options.engine)
     {
-        case StepperKind::Banded:
+        case StepperKind::BANDED:
         {
             const unsigned bands = options.bands > 0 ? suggestedBandCount(cells, options.bands, 1)
                                                      : suggestedBandCount(cells, options.threads);
             // forEachBand() caps it too.
             return std::min(bands, static_cast<unsigned>(options.size.height));
         }
-        case StepperKind::Reference:
+        case StepperKind::REFERENCE:
             return 1;
     }
     std::unreachable();
@@ -270,9 +270,9 @@ int run(std::span<char*> args)
 {
     Options      options;
     const Parsed parsed = parseArguments(args.subspan(1), options);
-    if (parsed != Parsed::Run)
+    if (parsed != Parsed::RUN)
     {
-        return parsed == Parsed::Help ? 0 : 2;
+        return parsed == Parsed::HELP ? 0 : 2;
     }
 
     const std::uint64_t budget = defaultMemoryBudget();
