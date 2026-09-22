@@ -1,3 +1,5 @@
+#include "wxLife/core/Grid.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <stdexcept>
@@ -7,7 +9,6 @@
 #include <gtest/gtest.h>
 
 #include "support/AsciiGrid.h"
-#include "wxLife/core/Grid.h"
 #include "wxLife/core/Types.h"
 
 namespace wxLife::core

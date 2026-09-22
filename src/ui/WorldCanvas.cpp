@@ -55,15 +55,15 @@ constexpr render::Pixel kPagePanPercent  = 90;
 
 WorldCanvas::WorldCanvas(wxWindow* parent, const core::World& world, Callbacks callbacks)
   : wxWindow(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize, kCanvasStyle),
-    world_(world),
-    callbacks_(std::move(callbacks)),
-    style_(themeStyle())
+    m_world(world),
+    m_callbacks(std::move(callbacks)),
+    m_style(themeStyle())
 {
     SetBackgroundStyle(wxBG_STYLE_PAINT);  // onPaint covers every pixel; no erase step
-    SetBackgroundColour(toWx(style_.outside));
-    style_.showGrid = defaults::kShowGrid;
-    viewport_.setWorldExtent(world_.extent());
-    viewport_.setCellSize(defaults::kCellSize, {});
+    SetBackgroundColour(toWx(m_style.outside));
+    m_style.showGrid = defaults::kShowGrid;
+    m_viewport.setWorldExtent(m_world.extent());
+    m_viewport.setCellSize(defaults::kCellSize, {});
 
     Bind(wxEVT_PAINT, &WorldCanvas::onPaint, this);
     Bind(wxEVT_SIZE, &WorldCanvas::onSize, this);
@@ -90,18 +90,18 @@ WorldCanvas::WorldCanvas(wxWindow* parent, const core::World& world, Callbacks c
 
 int WorldCanvas::cellSize() const noexcept
 {
-    return viewport_.cellSize();
+    return m_viewport.cellSize();
 }
 
 void WorldCanvas::setCellSize(int px)
 {
-    viewport_.setCellSize(px, canvasCentre());
+    m_viewport.setCellSize(px, canvasCentre());
     cameraMoved();
 }
 
 void WorldCanvas::zoomBy(int steps)
 {
-    viewport_.zoomBy(steps, canvasCentre());
+    m_viewport.zoomBy(steps, canvasCentre());
     cameraMoved();
 }
 
@@ -109,47 +109,47 @@ void WorldCanvas::fitWorld()
 {
     // The fit is kept while the canvas size changes: wx reports provisional sizes before and just
     // after Show(), and under Wayland the display scale can still change after the first frame.
-    keepFitted_ = true;
-    viewport_.setCanvasSize(deviceClientSize());
-    viewport_.fitWorld();
+    m_keepFitted = true;
+    m_viewport.setCanvasSize(deviceClientSize());
+    m_viewport.fitWorld();
     viewportChanged();
 }
 
 void WorldCanvas::centerWorld()
 {
-    const render::PixelSize content = viewport_.contentSize();
-    const render::PixelSize canvas  = viewport_.canvasSize();
-    viewport_.scrollTo(
+    const render::PixelSize content = m_viewport.contentSize();
+    const render::PixelSize canvas  = m_viewport.canvasSize();
+    m_viewport.scrollTo(
         {.x = (content.width - canvas.width) / 2, .y = (content.height - canvas.height) / 2});
     viewportChanged();
 }
 
 bool WorldCanvas::showGrid() const noexcept
 {
-    return style_.showGrid;
+    return m_style.showGrid;
 }
 
 void WorldCanvas::setShowGrid(bool show)
 {
-    style_.showGrid = show;
+    m_style.showGrid = show;
     Refresh(false);
 }
 
 const render::RenderStyle& WorldCanvas::style() const noexcept
 {
-    return style_;
+    return m_style;
 }
 
 void WorldCanvas::worldExtentChanged()
 {
-    viewport_.setWorldExtent(world_.extent());
+    m_viewport.setWorldExtent(m_world.extent());
     fitWorld();
 }
 
 core::Extent WorldCanvas::cellsThatFit() const noexcept
 {
-    const render::PixelSize canvas = viewport_.canvasSize();
-    const render::Pixel     cell   = viewport_.cellSize();
+    const render::PixelSize canvas = m_viewport.canvasSize();
+    const render::Pixel     cell   = m_viewport.cellSize();
 
     const auto cellsAlong = [cell](render::Pixel length) {
         return static_cast<core::Coord>(
@@ -166,7 +166,7 @@ void WorldCanvas::cancelStroke()
 void WorldCanvas::onPaint(wxPaintEvent& /*event*/)
 {
     wxPaintDC dc(this);
-    wxASSERT(viewport_.worldExtent() == world_.extent());
+    wxASSERT(m_viewport.worldExtent() == m_world.extent());
     // The client area can change without a size event, for example with the display scale. Only
     // the viewport changes inside a paint handler; the scrollbars and the listeners follow right
     // after it.
@@ -175,18 +175,18 @@ void WorldCanvas::onPaint(wxPaintEvent& /*event*/)
         CallAfter([this] { viewportChanged(); });
     }
 
-    rasterizer_.render(world_.cells(), viewport_, style_, frame_);
-    if (world_.automaton() == core::Automaton::LangtonAnt)
+    m_rasterizer.render(m_world.cells(), m_viewport, m_style, m_frame);
+    if (m_world.automaton() == core::Automaton::LangtonAnt)
     {
-        render::drawAnts(world_.ants(), viewport_, style_, frame_);
+        render::drawAnts(m_world.ants(), m_viewport, m_style, m_frame);
     }
-    const auto [width, height] = frame_.size();
+    const auto [width, height] = m_frame.size();
     if (width <= 0 || height <= 0)
     {
         return;
     }
-    // static_data: the image borrows frame_'s bytes instead of copying them.
-    const wxImage image(static_cast<int>(width), static_cast<int>(height), frame_.bytes().data(),
+    // static_data: the image borrows m_frame's bytes instead of copying them.
+    const wxImage image(static_cast<int>(width), static_cast<int>(height), m_frame.bytes().data(),
                         true);
     // Carrying the scale factor makes wx draw the bitmap at logical size, i.e. 1:1 on the
     // physical screen.
@@ -209,21 +209,21 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
 
     if (event.GetEventType() == wxEVT_LEAVE_WINDOW)
     {
-        pointer_.reset();
+        m_pointer.reset();
         setHovered(std::nullopt);
     }
     else if (event.GetEventType() == wxEVT_MOTION)
     {
-        pointer_ = point;
-        setHovered(viewport_.cellAt(point));
-        if (drag_ == Drag::Paint)
+        m_pointer = point;
+        setHovered(m_viewport.cellAt(point));
+        if (m_drag == Drag::Paint)
         {
             continuePaint(point);
         }
-        else if (drag_ == Drag::Pan)
+        else if (m_drag == Drag::Pan)
         {
-            viewport_.panBy(lastPanPoint_.x - point.x, lastPanPoint_.y - point.y);
-            lastPanPoint_ = point;
+            m_viewport.panBy(m_lastPanPoint.x - point.x, m_lastPanPoint.y - point.y);
+            m_lastPanPoint = point;
             cameraMoved();
         }
     }
@@ -232,36 +232,36 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
         // wxGTK sends the second press of a double click only as a DCLICK, so that counts as a
         // press too.
         SetFocus();  // single-key shortcuts need the focus
-        if (drag_ != Drag::None)
+        if (m_drag != Drag::None)
         {
             return;  // a second button during a drag changes nothing
         }
         const int button = event.GetButton();
 
-        dragButton_ = button;
+        m_dragButton = button;
         if (button == wxMOUSE_BTN_MIDDLE || (button == wxMOUSE_BTN_LEFT && event.ShiftDown()))
         {
-            drag_         = Drag::Pan;
-            lastPanPoint_ = point;
+            m_drag         = Drag::Pan;
+            m_lastPanPoint = point;
             CaptureMouse();
         }
         else if (button == wxMOUSE_BTN_LEFT && event.ControlDown())
         {
             // Places an ant instead of drawing, so no stroke starts and the mouse is not captured.
-            if (const std::optional<core::CellPos> cell = viewport_.cellAt(point))
+            if (const std::optional<core::CellPos> cell = m_viewport.cellAt(point))
             {
-                callbacks_.toggleAnt(*cell);
+                m_callbacks.toggleAnt(*cell);
             }
         }
-        else if (const std::optional<core::CellPos> cell = viewport_.cellAt(point))
+        else if (const std::optional<core::CellPos> cell = m_viewport.cellAt(point))
         {
             // Left toggles: pressing a live cell erases, pressing a dead one draws. Right always
             // erases.
-            const bool erase = button == wxMOUSE_BTN_RIGHT || world_.at(*cell) == core::kAlive;
+            const bool erase = button == wxMOUSE_BTN_RIGHT || m_world.at(*cell) == core::kAlive;
             beginPaint(*cell, erase ? core::kDead : core::kAlive);
         }
     }
-    else if (event.ButtonUp() && event.GetButton() == dragButton_)
+    else if (event.ButtonUp() && event.GetButton() == m_dragButton)
     {
         endDrag();
     }
@@ -282,23 +282,23 @@ void WorldCanvas::onWheel(wxMouseEvent& event)
         {
             return;
         }
-        wheelZoomNotches_ += notches;
-        const auto steps = static_cast<int>(wheelZoomNotches_);  // whole notches, toward zero
+        m_wheelZoomNotches += notches;
+        const auto steps = static_cast<int>(m_wheelZoomNotches);  // whole notches, toward zero
         if (steps == 0)
         {
             return;
         }
-        wheelZoomNotches_ -= steps;
-        viewport_.zoomBy(steps, pointer);
+        m_wheelZoomNotches -= steps;
+        m_viewport.zoomBy(steps, pointer);
     }
     else
     {
         // wxGTK: a positive rotation means up on the vertical axis but right on the horizontal one.
         const int    direction = horizontalAxis ? 1 : -1;
         const double pixels =
-            notches * kWheelPanLines * std::max(viewport_.cellSize(), kMinWheelLinePx) * direction;
+            notches * kWheelPanLines * std::max(m_viewport.cellSize(), kMinWheelLinePx) * direction;
         const bool horizontal = horizontalAxis || event.ShiftDown();
-        double&    pending    = horizontal ? wheelPanX_ : wheelPanY_;
+        double&    pending    = horizontal ? m_wheelPanX : m_wheelPanY;
 
         pending += pixels;
         const auto whole = static_cast<render::Pixel>(pending);
@@ -309,21 +309,21 @@ void WorldCanvas::onWheel(wxMouseEvent& event)
         pending -= static_cast<double>(whole);
         if (horizontal)
         {
-            viewport_.panBy(whole, 0);
+            m_viewport.panBy(whole, 0);
         }
         else
         {
-            viewport_.panBy(0, whole);
+            m_viewport.panBy(0, whole);
         }
     }
-    pointer_ = pointer;
+    m_pointer = pointer;
     cameraMoved();
 }
 
 void WorldCanvas::onScroll(wxScrollWinEvent& event)
 {
     const bool               horizontal = event.GetOrientation() == wxHORIZONTAL;
-    const render::PixelPoint offset     = viewport_.offset();
+    const render::PixelPoint offset     = m_viewport.offset();
 
     const auto along = [horizontal](render::PixelSize size) {
         return horizontal ? size.width : size.height;
@@ -331,19 +331,19 @@ void WorldCanvas::onScroll(wxScrollWinEvent& event)
     const auto moveBy = [&](render::Pixel delta) {
         if (horizontal)
         {
-            viewport_.panBy(delta, 0);
+            m_viewport.panBy(delta, 0);
         }
         else
         {
-            viewport_.panBy(0, delta);
+            m_viewport.panBy(0, delta);
         }
     };
     const auto moveTo = [&](render::Pixel position) {
-        viewport_.scrollTo(horizontal ? render::PixelPoint{.x = position, .y = offset.y}
-                                      : render::PixelPoint{.x = offset.x, .y = position});
+        m_viewport.scrollTo(horizontal ? render::PixelPoint{.x = position, .y = offset.y}
+                                       : render::PixelPoint{.x = offset.x, .y = position});
     };
-    const render::Pixel line = std::max(viewport_.cellSize(), kMinScrollbarLinePx);
-    const render::Pixel page = percentOf(along(viewport_.canvasSize()), kPagePanPercent);
+    const render::Pixel line = std::max(m_viewport.cellSize(), kMinScrollbarLinePx);
+    const render::Pixel page = percentOf(along(m_viewport.canvasSize()), kPagePanPercent);
 
     // Scroll event types are not constant expressions, so no switch.
     const wxEventType type = event.GetEventType();
@@ -369,7 +369,7 @@ void WorldCanvas::onScroll(wxScrollWinEvent& event)
     }
     else if (type == wxEVT_SCROLLWIN_BOTTOM)
     {
-        moveTo(along(viewport_.contentSize()) - along(viewport_.canvasSize()));
+        moveTo(along(m_viewport.contentSize()) - along(m_viewport.canvasSize()));
     }
     else  // THUMBTRACK, THUMBRELEASE
     {
@@ -385,7 +385,7 @@ void WorldCanvas::onKeyDown(wxKeyEvent& event)
     // accelerator.
     if (event.GetModifiers() == wxMOD_CONTROL && event.GetKeyCode() == WXK_HOME)
     {
-        send(ID_CENTER_VIEW);
+        send(CenterViewID);
         return;
     }
     // Ctrl and Alt combinations belong to the menu accelerators. (Shift does not count as a
@@ -395,11 +395,11 @@ void WorldCanvas::onKeyDown(wxKeyEvent& event)
         event.Skip();
         return;
     }
-    const render::PixelSize canvas       = viewport_.canvasSize();
+    const render::PixelSize canvas       = m_viewport.canvasSize();
     const render::Pixel     arrowPercent = event.ShiftDown() ? kPagePanPercent : kSmallPanPercent;
 
     const auto pan = [this](render::Pixel dx, render::Pixel dy) {
-        viewport_.panBy(dx, dy);
+        m_viewport.panBy(dx, dy);
         cameraMoved();
     };
 
@@ -427,29 +427,29 @@ void WorldCanvas::onKeyDown(wxKeyEvent& event)
             cancelStroke();
             break;
         case WXK_SPACE:
-            send(ID_RUN_PAUSE);
+            send(RunPauseID);
             break;
         case 'N':
-            send(ID_STEP);
+            send(StepID);
             break;
         case WXK_NUMPAD_ADD:
-            send(ID_ZOOM_IN);
+            send(ZoomInID);
             break;
         case WXK_NUMPAD_SUBTRACT:
-            send(ID_ZOOM_OUT);
+            send(ZoomOutID);
             break;
         case 'F':
-            send(ID_ZOOM_FIT);
+            send(ZoomFitID);
             break;
         case 'C':
         case WXK_HOME:
-            send(ID_CENTER_VIEW);
+            send(CenterViewID);
             break;
         case 'G':
-            send(ID_TOGGLE_GRID);
+            send(ToggleGridID);
             break;
         case 'W':
-            send(ID_TOGGLE_WRAP);
+            send(ToggleWrapID);
             break;
         default:
             event.Skip();  // wx then sends the char event that onChar() handles
@@ -474,17 +474,17 @@ void WorldCanvas::onChar(wxKeyEvent& event)
     switch (event.GetUnicodeKey())
     {
         case ']':
-            send(ID_FASTER);
+            send(FasterID);
             break;
         case '[':
-            send(ID_SLOWER);
+            send(SlowerID);
             break;
         case '+':
         case '=':
-            send(ID_ZOOM_IN);
+            send(ZoomInID);
             break;
         case '-':
-            send(ID_ZOOM_OUT);
+            send(ZoomOutID);
             break;
         default:
             event.Skip();
@@ -500,54 +500,54 @@ void WorldCanvas::onCaptureLost(wxMouseCaptureLostEvent& /*event*/)
 
 void WorldCanvas::onThemeChanged(wxSysColourChangedEvent& event)
 {
-    const bool showGrid = style_.showGrid;
+    const bool showGrid = m_style.showGrid;
 
-    style_          = themeStyle();
-    style_.showGrid = showGrid;
-    SetBackgroundColour(toWx(style_.outside));
+    m_style          = themeStyle();
+    m_style.showGrid = showGrid;
+    SetBackgroundColour(toWx(m_style.outside));
     Refresh(false);
     event.Skip();
 }
 
 void WorldCanvas::beginPaint(core::CellPos cell, core::Cell value)
 {
-    drag_           = Drag::Paint;
-    strokeValue_    = value;
-    lastStrokeCell_ = cell;
+    m_drag           = Drag::Paint;
+    m_strokeValue    = value;
+    m_lastStrokeCell = cell;
     CaptureMouse();
     const std::array firstCell{cell};
-    callbacks_.paintCells(firstCell, value);
+    m_callbacks.paintCells(firstCell, value);
 }
 
 void WorldCanvas::continuePaint(render::PixelPoint devicePoint)
 {
-    const core::CellPos target = viewport_.cellAtClamped(devicePoint);
-    if (!lastStrokeCell_)  // the camera moved (see viewportChanged())
+    const core::CellPos target = m_viewport.cellAtClamped(devicePoint);
+    if (!m_lastStrokeCell)  // the camera moved (see viewportChanged())
     {
-        lastStrokeCell_ = target;
+        m_lastStrokeCell = target;
         const std::array firstCell{target};
-        callbacks_.paintCells(firstCell, strokeValue_);
+        m_callbacks.paintCells(firstCell, m_strokeValue);
         return;
     }
-    if (target == *lastStrokeCell_)
+    if (target == *m_lastStrokeCell)
     {
         return;
     }
     // Painting the whole line from the previous cell leaves no gaps, however fast the pointer
     // moves.
-    strokeCells_.clear();
-    core::forEachCellOnLine(*lastStrokeCell_, target,
-                            [this](core::CellPos c) { strokeCells_.push_back(c); });
-    lastStrokeCell_ = target;
+    m_strokeCells.clear();
+    core::forEachCellOnLine(*m_lastStrokeCell, target,
+                            [this](core::CellPos c) { m_strokeCells.push_back(c); });
+    m_lastStrokeCell = target;
     // The line starts with the previous cell, which the last segment already painted.
-    callbacks_.paintCells(std::span(strokeCells_).subspan(1), strokeValue_);
+    m_callbacks.paintCells(std::span(m_strokeCells).subspan(1), m_strokeValue);
 }
 
 void WorldCanvas::endDrag()
 {
-    drag_       = Drag::None;
-    dragButton_ = wxMOUSE_BTN_NONE;
-    lastStrokeCell_.reset();
+    m_drag       = Drag::None;
+    m_dragButton = wxMOUSE_BTN_NONE;
+    m_lastStrokeCell.reset();
     // wx asserts when a window is destroyed while it holds the capture, or when a capture is
     // released twice.
     if (HasCapture())
@@ -558,46 +558,46 @@ void WorldCanvas::endDrag()
 
 void WorldCanvas::setHovered(std::optional<core::CellPos> cell)
 {
-    if (cell == hovered_)
+    if (cell == m_hovered)
     {
         return;
     }
-    hovered_ = cell;
-    callbacks_.hoverChanged(cell);
+    m_hovered = cell;
+    m_callbacks.hoverChanged(cell);
 }
 
 void WorldCanvas::viewportChanged()
 {
     syncScrollbars();
     // A zoom or scroll from the keyboard or a scrollbar moves the view under a resting pointer.
-    setHovered(pointer_ ? viewport_.cellAt(*pointer_) : std::nullopt);
+    setHovered(m_pointer ? m_viewport.cellAt(*m_pointer) : std::nullopt);
     // A stroke goes on from the cell now under the pointer. A line from the last cell would cross
     // cells the pointer never touched.
-    if (drag_ == Drag::Paint)
+    if (m_drag == Drag::Paint)
     {
-        lastStrokeCell_.reset();
+        m_lastStrokeCell.reset();
     }
     Refresh(false);
-    callbacks_.viewChanged();
+    m_callbacks.viewChanged();
 }
 
 void WorldCanvas::cameraMoved()
 {
-    keepFitted_ = false;
+    m_keepFitted = false;
     viewportChanged();
 }
 
 bool WorldCanvas::syncCanvasSize()
 {
     const render::PixelSize size = deviceClientSize();
-    if (size == viewport_.canvasSize())
+    if (size == m_viewport.canvasSize())
     {
         return false;
     }
-    viewport_.setCanvasSize(size);
-    if (keepFitted_)
+    m_viewport.setCanvasSize(size);
+    if (m_keepFitted)
     {
-        viewport_.fitWorld();
+        m_viewport.fitWorld();
     }
     return true;
 }
@@ -614,9 +614,9 @@ void WorldCanvas::syncScrollbars()
     // The first SetScrollbar() can still change the client size, so check once more.
     for (int pass = 0; pass < 2; ++pass)
     {
-        const render::PixelPoint offset  = viewport_.offset();
-        const render::PixelSize  canvas  = viewport_.canvasSize();
-        const render::PixelSize  content = viewport_.contentSize();
+        const render::PixelPoint offset  = m_viewport.offset();
+        const render::PixelSize  canvas  = m_viewport.canvasSize();
+        const render::PixelSize  content = m_viewport.contentSize();
         setBar(wxHORIZONTAL, offset.x, canvas.width, content.width);
         setBar(wxVERTICAL, offset.y, canvas.height, content.height);
         if (!syncCanvasSize())
@@ -643,7 +643,7 @@ render::PixelPoint WorldCanvas::toDevice(wxPoint logical) const
 
 render::PixelPoint WorldCanvas::canvasCentre() const noexcept
 {
-    const render::PixelSize canvas = viewport_.canvasSize();
+    const render::PixelSize canvas = m_viewport.canvasSize();
     return {.x = canvas.width / 2, .y = canvas.height / 2};
 }
 

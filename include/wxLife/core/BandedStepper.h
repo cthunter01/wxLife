@@ -25,11 +25,11 @@ public:
     CellCount step(const Grid& src, Grid& dst, const Rule& rule, Topology topology) override;
 
 private:
-    unsigned  maxThreads_;
-    CellCount minCellsPerBand_;
+    unsigned  m_maxThreads;
+    CellCount m_minCellsPerBand;
     /// One scratch row per band, sized before the bands start.
-    std::vector<std::vector<std::uint8_t>> columnSums_;
-    std::vector<CellCount>                 bandPopulation_;
+    std::vector<std::vector<std::uint8_t>> m_columnSums;
+    std::vector<CellCount>                 m_bandPopulation;
 };
 
 }  // namespace wxLife::core

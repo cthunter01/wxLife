@@ -9,10 +9,19 @@
 # this, style problems would only surface later, when the pre-commit hook or CI rejects the file. With it,
 # every file Claude touches is already in the project's style.
 #
-# It never blocks Claude: other file types are ignored, and a missing clang-format only prints a warning.
+# It never blocks Claude: other file types are ignored, and a missing clang-format or Python only prints a
+# warning.
 set -euo pipefail
 
-file=$(python3 -c 'import json, sys; print(json.load(sys.stdin).get("tool_input", {}).get("file_path", ""))')
+# Bytes in and out, without print()'s newline: Windows' text-mode stdout would add a \r to the path.
+read_path='import json, sys; sys.stdout.buffer.write(json.loads(sys.stdin.buffer.read()).get("tool_input", {}).get("file_path", "").encode())'
+input=$(cat)
+# Windows often has only 'python', and a 'python3' that just points at the Microsoft Store.
+if ! file=$(python3 -c "$read_path" <<<"$input" 2>/dev/null) &&
+    ! file=$(python -c "$read_path" <<<"$input" 2>/dev/null); then
+    echo "format-cpp hook: needs python3 or python to read the tool call; nothing was formatted" >&2
+    exit 0
+fi
 
 case $file in
     *.c | *.cc | *.cpp | *.cxx | *.h | *.hpp) ;;

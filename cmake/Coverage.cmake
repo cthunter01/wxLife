@@ -6,8 +6,17 @@ if(NOT WXLIFE_BUILD_TESTS)
     message(FATAL_ERROR "WXLIFE_ENABLE_COVERAGE needs WXLIFE_BUILD_TESTS=ON")
 endif()
 
-find_program(LLVM_PROFDATA_PROGRAM llvm-profdata REQUIRED)
-find_program(LLVM_COV_PROGRAM llvm-cov REQUIRED)
+# macOS: Xcode's llvm-cov and llvm-profdata match Apple Clang but aren't on PATH; xcrun finds them.
+set(llvm_tool_hints "")
+if(APPLE)
+    execute_process(COMMAND xcrun --find llvm-cov
+        OUTPUT_VARIABLE xcode_llvm_cov OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+    if(xcode_llvm_cov)
+        cmake_path(GET xcode_llvm_cov PARENT_PATH llvm_tool_hints)
+    endif()
+endif()
+find_program(LLVM_PROFDATA_PROGRAM llvm-profdata HINTS ${llvm_tool_hints} REQUIRED)
+find_program(LLVM_COV_PROGRAM llvm-cov HINTS ${llvm_tool_hints} REQUIRED)
 
 # Every test executable whose coverage should be counted.
 set(coverage_targets wxLife_tests)

@@ -8,7 +8,7 @@
       "targets": ["all"],
       "preset": "${command:cmake.activeBuildPresetName}",
       "group": { "kind": "build", "isDefault": true },
-      "problemMatcher": ["$gcc"]
+      "problemMatcher": ["$gcc", "$msCompile"]
     },
     {
       "label": "Test (active preset)",
@@ -21,19 +21,32 @@
     {
       "label": "Format all sources",
       "type": "shell",
-      "command": "git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' | xargs -0 --no-run-if-empty clang-format -i",
+      "command": "git ls-files -z -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp' | xargs -0 clang-format -i",
+      "windows": {
+        "command": "clang-format -i (git ls-files -- '*.c' '*.cc' '*.cpp' '*.cxx' '*.h' '*.hpp')"
+      },
       "problemMatcher": []
     },
     {
+      // Linux and macOS only: coverage needs Clang's llvm-cov.
       "label": "Coverage report",
       "type": "shell",
       "command": "cmake --workflow --preset coverage && xdg-open build/coverage/coverage/html/index.html",
+      "osx": {
+        "command": "cmake --workflow --preset coverage && open build/coverage/coverage/html/index.html"
+      },
       "problemMatcher": []
     },
     {
       "label": "Doxygen docs",
       "type": "shell",
       "command": "cmake --preset clang-debug && cmake --build --preset clang-debug --target docs && xdg-open build/clang-debug/docs/html/index.html",
+      "osx": {
+        "command": "cmake --preset clang-debug && cmake --build --preset clang-debug --target docs && open build/clang-debug/docs/html/index.html"
+      },
+      "windows": {
+        "command": "cmake --preset msvc-debug; if ($?) { cmake --build --preset msvc-debug --target docs }; if ($?) { Invoke-Item build/msvc-debug/docs/html/index.html }"
+      },
       "problemMatcher": []
     }
   ]

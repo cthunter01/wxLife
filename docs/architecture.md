@@ -114,22 +114,23 @@ applies to a cell with *n* live neighbours.
 - **`kernel::stepRow()`** (`src/core/StepKernel.cpp`) is the only hot loop.
   - It has two passes: vertical 3-sums, then 3 × 3 sums and the mask lookup.
   - `target_clones` builds it for AVX2 and for baseline x86-64, and the dynamic loader picks the right
-    one. This needs x86-64 and glibc (musl has no ifunc). With `WXLIFE_KERNEL_CLONES=OFF`, as in the
-    `headless` preset, only the baseline version is built.
-  - The file is compiled with `-O3` in every build type.
+    one. This needs x86-64 and glibc (musl has no ifunc), so macOS, Windows and ARM get the single version
+    the compiler's default target allows. With `WXLIFE_KERNEL_CLONES=OFF`, as in the `headless` preset,
+    only the baseline version is built.
+  - With GCC and Clang, the file is compiled with `-O3` in every build type.
 
 **Automata.** `World::step()` switches on `Automaton`, and the switch has no `default`, so `-Wswitch`
 lists every place a third automaton would need.
-- **`Automaton::Life`** is the path above: refresh the border, run the stepper into `next_`, swap.
-- **`Automaton::LangtonAnt`** (`wxLife/core/Ant.h`, header-only) moves each ant of `ants_` once, in
-  index order, straight on `current_`. There is no border to refresh and no buffer to swap, and each ant
+- **`Automaton::Life`** is the path above: refresh the border, run the stepper into `m_next`, swap.
+- **`Automaton::LangtonAnt`** (`wxLife/core/Ant.h`, header-only) moves each ant of `m_ants` once, in
+  index order, straight on `m_current`. There is no border to refresh and no buffer to swap, and each ant
   therefore sees what the ones before it have just left. One move is: turn right on a dead cell or left
   on a live one, flip that cell, step forward. `advance()` returns the ±1 the population changed by, so
   the counter stays exact without a recount.
 - An ant **always wraps**, whatever `Topology` says, because an ant that walked off a bounded edge would
   have to be deleted while a wrapped one keeps drawing. The UI therefore greys out Wrap Edges, the rule
   and the engine while the ant runs, so no control silently means nothing.
-- `next_` is left allocated but idle in ant mode. It keeps `worldBytes()`, `validateExtent()` and
+- `m_next` is left allocated but idle in ant mode. It keeps `worldBytes()`, `validateExtent()` and
   `resize()` untouched, so the memory budget does not move under the user when the automaton does.
 - Every ant is always inside the world. `setAnts()`, `resetAnts()`, `toggleAntAt()` and `resize()` are
   the four places that keep it that way, and it is what makes `advance()`'s precondition hold. `World`
@@ -139,8 +140,9 @@ lists every place a third automaton would need.
   keeps nothing lay them out again.
 
 **Threads.** `forEachBand()` is the only code that creates threads.
-- Band 0 runs on the calling thread and the other bands on `std::jthread`s. A band whose thread cannot
-  be started runs on the calling thread instead.
+- Band 0 runs on the calling thread and the other bands on `std::thread`s, which it joins. (Not
+  `std::jthread`: Apple's libc++ has it only from LLVM 20.) A band whose thread cannot be started runs
+  on the calling thread instead.
 - It returns only after every band has finished.
 - Bands read `src` and write different rows of `dst`, so they need no locks.
 
@@ -177,7 +179,9 @@ a prototype, even 2 bands were faster than 1 (see Extension points below).
 - **`resize()`** allocates both new grids before it changes anything (the strong exception guarantee).
   With `keepPattern` it copies the overlapping block, centred.
 - **`validateExtent()`** checks a size against the side limits (1 to 100,000) and the memory budget.
-  The budget is a quarter of the RAM, clamped to [256 MiB, 16 GiB]. Under Linux's default memory
+  The budget is a quarter of the RAM, clamped to [256 MiB, 16 GiB]. `physicalMemoryBytes()` is the one
+  OS query in `core`: `sysconf()` on Linux and macOS, `GlobalMemoryStatusEx()` on Windows. Under Linux's
+  default memory
   overcommit, allocating a world within the budget practically never fails, so this check, not
   `std::bad_alloc`, is what keeps a world within the machine's memory.
 
@@ -209,7 +213,7 @@ pixel types and `Rgb`, as `wxLife/core/Types.h` does for cells.
 - **Anchored zoom.** `setCellSize()` keeps the world point under the centre of the anchor pixel inside
   that pixel (at most half a pixel off), so the cell under the anchor stays, unless clamping moves the
   view. It uses only integers. On each axis, zooms at the same anchor, with nothing else moving the
-  camera in between, form a run that keeps the point of its first zoom (`zoomRuns_`). Rounding errors
+  camera in between, form a run that keeps the point of its first zoom (`m_zoomRuns`). Rounding errors
   therefore never add up, and going back to a size restores its offset. Clamping an axis, which includes
   centring a world smaller than the canvas, ends that axis's run only.
 - **Zoom steps.** `zoomBy()` moves along `kZoomSteps`.
@@ -255,7 +259,7 @@ work: its virtual-size model cannot express anchored zoom or the negative offset
 - Scrollbars that are always shown keep the client size stable. With automatic scrollbars, the client
   size was measured changing without any size event.
 
-**Fit.** `fitWorld()` fits the world into the canvas and *keeps* it fitted (`keepFitted_`) until the
+**Fit.** `fitWorld()` fits the world into the canvas and *keeps* it fitted (`m_keepFitted`) until the
 user moves the camera (`cameraMoved()`).
 - The window gets its final size, and under Wayland its final scale, only after the first frame. A
   one-time fit would therefore use the wrong size.
@@ -276,13 +280,13 @@ pressed from the keyboard (except Apply), it gives the focus back to the canvas,
 the clicked control and Space would press that control again.
 
 ```
-[Run] click → wxEVT_BUTTON on the button → emitCommand(ID_RUN_PAUSE)
+[Run] click → wxEVT_BUTTON on the button → emitCommand(RunPauseID)
   → wxEVT_MENU propagates: button → static box → ControlPanel → MainFrame
-  → MainFrame::onRunPause → runner_.toggle() → syncControls() → updateStatusBar(true)
+  → MainFrame::onRunPause → m_runner.toggle() → syncControls() → updateStatusBar(true)
 
-timer tick → SimulationRunner::onTimer → pacer_.plan(now) → world_.step() × N
-  → pacer_.commit(N), meter_.record(N, now) → MainFrame::onSimulationTick
-  → canvas_->Refresh(false) + updateStatusBar(false) → scheduleNext() (idle gap ≥ 4 ms)
+timer tick → SimulationRunner::onTimer → m_pacer.plan(now) → m_world.step() × N
+  → m_pacer.commit(N), m_meter.record(N, now) → MainFrame::onSimulationTick
+  → m_canvas->Refresh(false) + updateStatusBar(false) → scheduleNext() (idle gap ≥ 4 ms)
 
 GTK frame clock → WorldCanvas::onPaint → syncCanvasSize()
   → Rasterizer::render(world.cells(), viewport, style, frame)
@@ -290,17 +294,17 @@ GTK frame clock → WorldCanvas::onPaint → syncCanvasSize()
   → wxImage (borrowed bytes) → wxBitmap(image, depth, scale) → DrawBitmap
 
 left drag → WorldCanvas::onMouse → continuePaint → Viewport::cellAtClamped → forEachCellOnLine
-  → callbacks_.paintCells(segment, value) → MainFrame::onPaintCells → world_.setCells
-  → worldContentChanged() → canvas_->Refresh(false) + updateStatusBar(true)
+  → m_callbacks.paintCells(segment, value) → MainFrame::onPaintCells → m_world.setCells
+  → worldContentChanged() → m_canvas->Refresh(false) + updateStatusBar(true)
 
-Ctrl+left click → WorldCanvas::onMouse → callbacks_.toggleAnt(cell) → MainFrame::onToggleAnt
-  → world_.toggleAntAt(cell) → syncControls() (the panel's ant count follows) → worldContentChanged()
+Ctrl+left click → WorldCanvas::onMouse → m_callbacks.toggleAnt(cell) → MainFrame::onToggleAnt
+  → m_world.toggleAntAt(cell) → syncControls() (the panel's ant count follows) → worldContentChanged()
 
 Ctrl+wheel → WorldCanvas::onWheel → Viewport::zoomBy(steps, pointer) → cameraMoved()
-  → viewportChanged() → syncScrollbars(), Refresh(false), callbacks_.viewChanged
-  → MainFrame::onViewChanged → panel_->setCellSize(), updateStatusBar(true)
+  → viewportChanged() → syncScrollbars(), Refresh(false), m_callbacks.viewChanged
+  → MainFrame::onViewChanged → m_panel->setCellSize(), updateStatusBar(true)
 
-G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
+G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ToggleGridID)
   → the same MainFrame::onToggleGrid as the menu item and the check box
 ```
 
@@ -311,7 +315,7 @@ G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
   `viewportChanged()` forgets the previous cell. The next motion then paints only the cell under the
   pointer and goes on from there, so no line crosses cells the pointer never touched.
 - The canvas captures the mouse for the whole drag. Only the release of the button that started the drag
-  (`dragButton_`) ends it.
+  (`m_dragButton`) ends it.
 - The capture is released in one place, `endDrag()`, which also handles capture loss, Esc and
   `cancelStroke()`. Ending a stroke keeps the cells it has painted.
 
@@ -320,8 +324,8 @@ G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
 2. Call `WorldSizeDialog::ask()`, passing the current size, `cellsThatFit()` for the "Fit window"
    preset, and the budget. The dialog checks the typed text of both boxes, not `wxSpinCtrl`'s clamped
    value, and its `Validate()` refuses OK and Enter until the size is valid.
-3. Check the size again with `validateExtent()`. Inside a `try` block, call `world_.resize()`, then
-   `canvas_->worldExtentChanged()` at once, so no paint ever sees a viewport with the old extent. On
+3. Check the size again with `validateExtent()`. Inside a `try` block, call `m_world.resize()`, then
+   `m_canvas->worldExtentChanged()` at once, so no paint ever sees a viewport with the old extent. On
    `std::bad_alloc`, show a message: the old world is still intact. (Under Linux's default overcommit
    this is rare; see `validateExtent()` above.)
 4. If the Reference engine is active and the world is now larger than
@@ -458,14 +462,15 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
 - **Other suites.** The rest of `core` (worlds, rules, grids, lines, bands, random numbers, limits,
   speed, pacing and the rate meter, formatting) has its own suites. `tests/support/AsciiGrid.h` lets
   tests write patterns as text, such as `".O."`.
-- **`GuiSmokeTest`** (CTest label `gui`) opens a real `MainFrame` per test. It sends commands with
+- **`GuiSmokeTest`** (CTest label `gui`, in `tests/ui/GuiSmokeTests.cpp`) opens a real `MainFrame` per
+  test. It is built only with wxGTK, so only on Linux. It sends commands with
   `emitCommand()` and synthetic wx events to the controls, the canvas and the scrollbars, types into
   number boxes through GTK, and answers dialogs with a `wxModalDialogHook`. wx starts in the suite's
   `SetUpTestSuite()`, so only the processes that run these tests start GTK. The tests run one at a time.
   They are skipped when no display is configured, and they fail when a configured display cannot be
   opened.
-- **Checks outside GoogleTest.** CTest also runs `layering` and `static_link` (`ldd wxLife` must list
-  no wxWidgets library). Configuring already fails if `wx::core` or `wx::base` is not the static library
+- **Checks outside GoogleTest.** CTest also runs `layering` and `static_link` (`ldd`, `otool -L` or
+  `dumpbin /dependents` must list no wxWidgets library for `wxLife`). Configuring already fails if `wx::core` or `wx::base` is not the static library
   built from the fetched sources.
 - **Presets.** The `headless` preset builds the kernel without clones, so its tests cover the baseline
   loop; the other presets use the AVX2 clone on CPUs that have AVX2. The `asan` preset runs every test,
@@ -483,7 +488,7 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
 | More B/S presets | `kRulePresets` | One line per preset. The parser is `constexpr`, so a typo fails to compile. |
 | New engines (bit-packed rows, explicit SIMD, skipping empty rows) | `Stepper`, `StepperKind`, `kStepperKinds`, `makeStepper()`, `kernel::stepRow()`, `wxLife_bench --engine` | Add a class, an enum value, a `kStepperKinds` entry and a `makeStepper()` case. `-Wswitch` then points at the other switches that need a case: `toString(StepperKind)`, the benchmark's `bandCount()` and `engineMenuItem()` in `src/ui/MainFrame.cpp`. The pattern tests in `StepperTest` pick the engine up from `kStepperKinds`; add it to the comparison with `ReferenceStepper` there. In the UI: a `CommandId`, a radio item in `buildMenuBar()` and a handler row in `bindCommands()`. |
 | Persistent thread pool | `forEachBand()` is the only code that creates threads | Replace its body; nothing else changes. A quick prototype pool stepped 1000² in 0.15 ms with 2 bands (0.38 ms with threads started per step) and in 0.09 ms with 4, so `suggestedBandCount()` could then split smaller worlds too. |
-| Background stepping (worlds of more than about 200 million cells on this machine) | `SimulationRunner` is the only caller of `World::step()`, and painting reads only `World::cells()` | Step a copy on a `std::jthread` and hand finished grids to the canvas. This stays inside `ui/`, plus a small `core` helper. |
+| Background stepping (worlds of more than about 200 million cells on this machine) | `SimulationRunner` is the only caller of `World::step()`, and painting reads only `World::cells()` | Step a copy on a background `std::thread` and hand finished grids to the canvas. This stays inside `ui/`, plus a small `core` helper. |
 | Other rule families (Generations, Larger than Life) | Only the steppers interpret a `Rule`; the rest of the code only parses, prints and compares it. `Cell` is a byte. | Make `Rule` a `std::variant` and give each family its own stepper, plus a case in `Rule::toString()`, `findPreset()` and the preset list. The rasterizer would need colours for the extra states. |
 | More automata (other turmites, multi-state ants) | `Automaton`, `kAutomata` and the `default`-less switch in `World::step()`; `wxLife/core/Ant.h` holds the ant's own rule | Add an enum value and a `kAutomata` entry; `-Wswitch` then points at the four switches that need a case: `toString(Automaton)`, `World::step()`, and `worldText()` and `automatonMenuItem()` in `src/ui/MainFrame.cpp`. The panel's choice is built from `kAutomata`, so it needs no change. Multi-state cells would additionally break the binary assumptions listed in the row above. With a third automaton it is time to extract an interface from `World` instead of widening the switch. |
 | Other topologies (cylinder, Klein bottle) | `Topology` and `kTopologies`. `-Wswitch` lists the `core` code that needs a case: `toString(Topology)`, `Grid::updateBorder()` and the `alive` lambda in `ReferenceStepper::step()`. | Add an enum value, a `kTopologies` entry and a copy rule; `StepperTest` and `WorldTest` then cover it. The Wrap Edges toggle in `MainFrame` would become a choice. |

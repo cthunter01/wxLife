@@ -1,3 +1,5 @@
+#include "wxLife/render/Rasterizer.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -18,7 +20,6 @@
 #include "wxLife/core/Random.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
-#include "wxLife/render/Rasterizer.h"
 #include "wxLife/render/RenderStyle.h"
 #include "wxLife/render/Types.h"
 #include "wxLife/render/Viewport.h"

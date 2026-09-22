@@ -1,11 +1,11 @@
+#include "wxLife/core/Random.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <random>
 
 #include <gtest/gtest.h>
-
-#include "wxLife/core/Random.h"
 
 namespace wxLife::core
 {

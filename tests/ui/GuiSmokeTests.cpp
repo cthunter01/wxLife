@@ -70,6 +70,7 @@
 
 // GTK's setter for the text of an entry, such as a number box. Declared here because the tests do
 // not see GTK's headers (wx/defs.h declares GtkWidget).
+// NOLINTNEXTLINE(readability-identifier-naming): GTK names it
 extern "C" void gtk_entry_set_text(GtkWidget* entry, const char* text);
 
 namespace wxLife::core
@@ -97,8 +98,8 @@ using Clock = std::chrono::steady_clock;
 // wx assertion failures and logged errors. Each one fails the test that caused it.
 std::vector<std::string>& problems()
 {
-    static std::vector<std::string> list;
-    return list;
+    static std::vector<std::string> s_list;
+    return s_list;
 }
 
 void recordAssertion(const wxString& file, int line, const wxString& function,
@@ -192,16 +193,16 @@ bool displayConfigured()
 class WxSession final
 {
 public:
-    static bool active() { return active_; }
+    static bool active() { return s_active; }
     /// A display is configured, but wx did not start.
-    static bool startFailed() { return startFailed_; }
-    static bool drawsWindows() { return drawsWindows_; }
-    static bool recheckDrawing() { return drawsWindows_ = displayDrawsWindows(); }
+    static bool startFailed() { return s_startFailed; }
+    static bool drawsWindows() { return s_drawsWindows; }
+    static bool recheckDrawing() { return s_drawsWindows = displayDrawsWindows(); }
 
     /// Starts wx on the first call; later calls do nothing, because GTK cannot be started twice.
     static void start()
     {
-        if (std::exchange(started_, true) || !displayConfigured())
+        if (std::exchange(s_started, true) || !displayConfigured())
         {
             return;  // without a display every test skips itself
         }
@@ -217,13 +218,13 @@ public:
         // No ASSERT here: the tests report the failure instead (GuiSmokeTest::SetUp()).
         if (!wxEntryStart(argc, argv.data()))
         {
-            startFailed_ = true;
+            s_startFailed = true;
             return;
         }
-        active_ = true;
+        s_active = true;
         if (!wxTheApp->CallOnInit())
         {
-            startFailed_ = true;
+            s_startFailed = true;
             return;
         }
         wxSetAssertHandler(recordAssertion);
@@ -241,20 +242,20 @@ public:
     /// Destroys any window still left, then the app.
     static void stop()
     {
-        if (!active_)
+        if (!s_active)
         {
             return;
         }
         wxTheApp->OnExit();
         wxEntryCleanup();
-        active_ = false;
+        s_active = false;
     }
 
 private:
-    static inline bool started_      = false;
-    static inline bool active_       = false;
-    static inline bool startFailed_  = false;
-    static inline bool drawsWindows_ = false;
+    static inline bool s_started      = false;
+    static inline bool s_active       = false;
+    static inline bool s_startFailed  = false;
+    static inline bool s_drawsWindows = false;
 };
 
 // -------------------------------------------------------------------------------------------------
@@ -480,14 +481,13 @@ class GuiSmokeTest : public testing::Test
 protected:
     enum class StatusField : std::uint8_t
     {
-        kState,
-        kGeneration,
-        kPopulation,
-        kSpeed,
-        kWorld,
-        kView
+        State,
+        Generation,
+        Population,
+        Speed,
+        World,
+        View
     };
-    using enum StatusField;
 
     static void SetUpTestSuite() { WxSession::start(); }
     static void TearDownTestSuite() { WxSession::stop(); }
@@ -504,17 +504,17 @@ protected:
                 << "No display: DISPLAY, WAYLAND_DISPLAY and BROADWAY_DISPLAY are all unset.";
         }
 
-        frame_  = new MainFrame(world_);  // wx deletes it after it is closed
-        canvas_ = &first<WorldCanvas>(*frame_);
-        panel_  = &first<ControlPanel>(*frame_);
+        m_frame  = new MainFrame(m_world);  // wx deletes it after it is closed
+        m_canvas = &first<WorldCanvas>(*m_frame);
+        m_panel  = &first<ControlPanel>(*m_frame);
         // Handlers bound later run first, so this counts every paint and Skip() lets the canvas
         // draw it.
-        canvas_->Bind(wxEVT_PAINT, [this](wxPaintEvent& event) {
-            ++paints_;
+        m_canvas->Bind(wxEVT_PAINT, [this](wxPaintEvent& event) {
+            ++m_paints;
             event.Skip();
         });
         // Without activation, keys pressed by the person at the desktop go where they did.
-        frame_->ShowWithoutActivating();
+        m_frame->ShowWithoutActivating();
         paintedSince(0);
     }
 
@@ -524,12 +524,12 @@ protected:
         {
             return;
         }
-        if (frame_.get() != nullptr)
+        if (m_frame.get() != nullptr)
         {
-            frame_->Close();
-            EXPECT_TRUE(runUntil([this] { return !frame_; }))
+            m_frame->Close();
+            EXPECT_TRUE(runUntil([this] { return !m_frame; }))
                 << "The closed frame was not destroyed.";
-            delete frame_.get();  // only left if the check failed; it must not outlive world_
+            delete m_frame.get();  // only left if the check failed; it must not outlive m_world
         }
         EXPECT_EQ(wxWindow::GetCapture(), nullptr);
         for (const std::string& problem : std::exchange(problems(), {}))
@@ -539,11 +539,11 @@ protected:
     }
 
     // What a menu item, its accelerator or a canvas key sends.
-    void command(CommandId id) { emitCommand(*frame_, id); }
+    void command(CommandId id) { emitCommand(*m_frame, id); }
 
     [[nodiscard]] wxMenuItem& menuItem(CommandId id) const
     {
-        return *frame_->GetMenuBar()->FindItem(id);
+        return *m_frame->GetMenuBar()->FindItem(id);
     }
     [[nodiscard]] std::string menuLabel(CommandId id) const
     {
@@ -552,17 +552,17 @@ protected:
 
     [[nodiscard]] std::string status(StatusField field) const
     {
-        return toUtf8(frame_->GetStatusBar()->GetStatusText(std::to_underlying(field)));
+        return toUtf8(m_frame->GetStatusBar()->GetStatusText(std::to_underlying(field)));
     }
 
     [[nodiscard]] wxStaticBox& group(std::string_view label) const
     {
-        return labelled<wxStaticBox>(*panel_, label);
+        return labelled<wxStaticBox>(*m_panel, label);
     }
 
     [[nodiscard]] wxPoint canvasCentre() const
     {
-        const wxSize size = canvas_->GetClientSize();
+        const wxSize size = m_canvas->GetClientSize();
         return {size.x / 2, size.y / 2};
     }
 
@@ -570,7 +570,7 @@ protected:
     [[nodiscard]] std::optional<core::CellPos> hoveredCell() const
     {
         static const std::regex kCell(R"(^\((-?[0-9]+), (-?[0-9]+)\))");
-        const std::string       text = status(kView);
+        const std::string       text = status(StatusField::View);
         std::smatch             match;
         if (!std::regex_search(text, match, kCell))
         {
@@ -583,7 +583,7 @@ protected:
     // a real mouse move.
     std::optional<core::CellPos> pointAt(wxPoint at)
     {
-        mouse(*canvas_, wxEVT_MOTION, at);
+        mouse(*m_canvas, wxEVT_MOTION, at);
         return hoveredCell();
     }
 
@@ -596,7 +596,7 @@ protected:
         {
             return false;
         }
-        if (runUntil([&] { return paints_ > before; }))
+        if (runUntil([&] { return m_paints > before; }))
         {
             return true;
         }
@@ -610,9 +610,9 @@ protected:
     // backend allows it (X11).
     bool repaint() const  // NOLINT(modernize-use-nodiscard)
     {
-        const int before = paints_;
-        canvas_->Refresh(false);
-        canvas_->Update();
+        const int before = m_paints;
+        m_canvas->Refresh(false);
+        m_canvas->Update();
         return paintedSince(before);
     }
 
@@ -620,156 +620,157 @@ protected:
     // (render::Viewport::fitWorld()).
     [[nodiscard]] int fittedCellSize() const
     {
-        const wxSize       logical = canvas_->GetClientSize();
-        const double       scale   = canvas_->GetContentScaleFactor();
-        const core::Extent world   = world_.extent();
+        const wxSize       logical = m_canvas->GetClientSize();
+        const double       scale   = m_canvas->GetContentScaleFactor();
+        const core::Extent world   = m_world.extent();
         const long         fit     = std::min(std::lround(logical.x * scale) / world.width,
                                               std::lround(logical.y * scale) / world.height);
         return static_cast<int>(std::clamp<long>(fit, render::kMinCellSize, render::kMaxCellSize));
     }
 
-    [[nodiscard]] core::CellCount countedPopulation() const { return world_.cells().countAlive(); }
+    [[nodiscard]] core::CellCount countedPopulation() const { return m_world.cells().countAlive(); }
 
     [[nodiscard]] static std::string countText(std::int64_t n)
     {
         return core::formatCount(static_cast<std::uint64_t>(n));
     }
 
-    core::World          world_{defaults::kWorldExtent, core::Rule{}, defaults::kTopology};
-    wxWeakRef<MainFrame> frame_;  ///< Becomes null once wx has deleted the frame.
-    WorldCanvas*         canvas_ = nullptr;
-    ControlPanel*        panel_  = nullptr;
-    int                  paints_ = 0;
+    core::World          m_world{defaults::kWorldExtent, core::Rule{}, defaults::kTopology};
+    wxWeakRef<MainFrame> m_frame;  ///< Becomes null once wx has deleted the frame.
+    WorldCanvas*         m_canvas = nullptr;
+    ControlPanel*        m_panel  = nullptr;
+    int                  m_paints = 0;
 };
 
 TEST_F(GuiSmokeTest, OpensPausedWithARandomWorldFitted)
 {
     // MainFrame's constructor fills 25% of the world at random (the panel's density).
-    EXPECT_EQ(world_.generation(), 0U);
-    EXPECT_NEAR(
-        static_cast<double>(world_.population()) / static_cast<double>(world_.extent().cellCount()),
-        0.25, 0.01);
-    EXPECT_EQ(world_.population(), countedPopulation());
+    EXPECT_EQ(m_world.generation(), 0U);
+    EXPECT_NEAR(static_cast<double>(m_world.population()) /
+                    static_cast<double>(m_world.extent().cellCount()),
+                0.25, 0.01);
+    EXPECT_EQ(m_world.population(), countedPopulation());
 
-    EXPECT_EQ(status(kState), "Paused");
-    EXPECT_EQ(status(kGeneration), "Gen 0");
-    EXPECT_EQ(status(kPopulation), "Pop " + countText(world_.population()));
-    EXPECT_EQ(status(kSpeed), "30 gen/s");
-    EXPECT_EQ(status(kWorld), "512 × 512 · torus · B3/S23 · Banded");
+    EXPECT_EQ(status(StatusField::State), "Paused");
+    EXPECT_EQ(status(StatusField::Generation), "Gen 0");
+    EXPECT_EQ(status(StatusField::Population), "Pop " + countText(m_world.population()));
+    EXPECT_EQ(status(StatusField::Speed), "30 gen/s");
+    EXPECT_EQ(status(StatusField::World), "512 × 512 · torus · B3/S23 · Banded");
 
     // The world is fitted to the canvas. The canvas notices a late change of its size or display
     // scale when it paints, so this is checked after a paint.
     if (repaint())
     {
-        EXPECT_EQ(canvas_->cellSize(), fittedCellSize());
+        EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
     }
-    EXPECT_EQ(panel_->cellSize(), canvas_->cellSize());
-    EXPECT_TRUE(canvas_->showGrid());
-    EXPECT_EQ(panel_->speed(), defaults::kSpeed);
-    EXPECT_EQ(panel_->ruleText(), "B3/S23");
-    EXPECT_EQ(panel_->selectedPreset(), 0U);  // Conway's Life
+    EXPECT_EQ(m_panel->cellSize(), m_canvas->cellSize());
+    EXPECT_TRUE(m_canvas->showGrid());
+    EXPECT_EQ(m_panel->speed(), defaults::kSpeed);
+    EXPECT_EQ(m_panel->ruleText(), "B3/S23");
+    EXPECT_EQ(m_panel->selectedPreset(), 0U);  // Conway's Life
 
-    EXPECT_EQ(menuLabel(ID_RUN_PAUSE), "Run");
-    EXPECT_FALSE(menuItem(ID_TOGGLE_MAX_SPEED).IsChecked());
-    EXPECT_TRUE(menuItem(ID_ENGINE_BANDED).IsChecked());
-    EXPECT_TRUE(menuItem(ID_ENGINE_REFERENCE).IsEnabled());
-    EXPECT_TRUE(menuItem(ID_TOGGLE_WRAP).IsChecked());
-    EXPECT_TRUE(menuItem(ID_TOGGLE_GRID).IsChecked());
+    EXPECT_EQ(menuLabel(RunPauseID), "Run");
+    EXPECT_FALSE(menuItem(ToggleMaxSpeedID).IsChecked());
+    EXPECT_TRUE(menuItem(EngineBandedID).IsChecked());
+    EXPECT_TRUE(menuItem(EngineReferenceID).IsEnabled());
+    EXPECT_TRUE(menuItem(ToggleWrapID).IsChecked());
+    EXPECT_TRUE(menuItem(ToggleGridID).IsChecked());
 
     // Life runs until the user asks for the other automaton, and it has no ants.
-    EXPECT_EQ(world_.automaton(), core::Automaton::Life);
-    EXPECT_TRUE(world_.ants().empty());
-    EXPECT_TRUE(menuItem(ID_AUTOMATON_LIFE).IsChecked());
-    EXPECT_FALSE(menuItem(ID_RESET_ANTS).IsEnabled());
+    EXPECT_EQ(m_world.automaton(), core::Automaton::Life);
+    EXPECT_TRUE(m_world.ants().empty());
+    EXPECT_TRUE(menuItem(AutomatonLifeID).IsChecked());
+    EXPECT_FALSE(menuItem(ResetAntsID).IsEnabled());
 }
 
 TEST_F(GuiSmokeTest, RunsPausesAndSteps)
 {
     // Run for about half a second at the default 30 generations per second.
     const Clock::time_point started      = Clock::now();
-    const int               paintsBefore = paints_;
-    command(ID_RUN_PAUSE);
-    EXPECT_EQ(status(kState), "Running");
-    EXPECT_EQ(status(kSpeed), "30 gen/s");  // only the target until a rate has been measured
-    EXPECT_EQ(menuLabel(ID_RUN_PAUSE), "Pause");
-    EXPECT_NO_THROW(labelled<wxButton>(*panel_, "Pause"));
+    const int               paintsBefore = m_paints;
+    command(RunPauseID);
+    EXPECT_EQ(status(StatusField::State), "Running");
+    EXPECT_EQ(status(StatusField::Speed),
+              "30 gen/s");  // only the target until a rate has been measured
+    EXPECT_EQ(menuLabel(RunPauseID), "Pause");
+    EXPECT_NO_THROW(labelled<wxButton>(*m_panel, "Pause"));
     runFor(500ms);
-    EXPECT_TRUE(runUntil([this] { return world_.generation() > 0; }));
+    EXPECT_TRUE(runUntil([this] { return m_world.generation() > 0; }));
     const std::regex measured(R"(30 gen/s \([0-9]+\.[0-9]\))");  // target and measured rate
-    EXPECT_TRUE(runUntil([&] { return std::regex_match(status(kSpeed), measured); }))
-        << status(kSpeed);
-    command(ID_RUN_PAUSE);
+    EXPECT_TRUE(runUntil([&] { return std::regex_match(status(StatusField::Speed), measured); }))
+        << status(StatusField::Speed);
+    command(RunPauseID);
     const double seconds = std::chrono::duration<double>(Clock::now() - started).count();
 
     // The pacer never runs ahead of the target rate, and the ticks repaint the canvas (several
     // paints, not just one that was still pending).
-    const std::uint64_t generation = world_.generation();
+    const std::uint64_t generation = m_world.generation();
     EXPECT_LE(static_cast<double>(generation), (seconds * defaults::kSpeed.gensPerSecond) + 1);
     paintedSince(paintsBefore + 2);
-    EXPECT_EQ(world_.population(), countedPopulation());
-    EXPECT_EQ(status(kState), "Paused");
-    EXPECT_EQ(status(kGeneration), "Gen " + core::formatCount(generation));
-    EXPECT_EQ(status(kPopulation), "Pop " + countText(world_.population()));
-    EXPECT_EQ(menuLabel(ID_RUN_PAUSE), "Run");
+    EXPECT_EQ(m_world.population(), countedPopulation());
+    EXPECT_EQ(status(StatusField::State), "Paused");
+    EXPECT_EQ(status(StatusField::Generation), "Gen " + core::formatCount(generation));
+    EXPECT_EQ(status(StatusField::Population), "Pop " + countText(m_world.population()));
+    EXPECT_EQ(menuLabel(RunPauseID), "Run");
 
     // Paused means paused.
     runFor(200ms);
-    EXPECT_EQ(world_.generation(), generation);
+    EXPECT_EQ(m_world.generation(), generation);
 
     // One generation at a time: the menu command, the panel button, and N on the canvas.
-    command(ID_STEP);
-    click(labelled<wxButton>(*panel_, "Step"));
-    pressKey(*canvas_, 'N');
-    EXPECT_EQ(world_.generation(), generation + 3);
-    EXPECT_EQ(status(kGeneration), "Gen " + core::formatCount(generation + 3));
-    EXPECT_EQ(world_.population(), countedPopulation());
+    command(StepID);
+    click(labelled<wxButton>(*m_panel, "Step"));
+    pressKey(*m_canvas, 'N');
+    EXPECT_EQ(m_world.generation(), generation + 3);
+    EXPECT_EQ(status(StatusField::Generation), "Gen " + core::formatCount(generation + 3));
+    EXPECT_EQ(m_world.population(), countedPopulation());
 
     // Space and the panel button toggle too. Step while running pauses first.
-    pressKey(*canvas_, WXK_SPACE);
-    EXPECT_EQ(status(kState), "Running");
-    command(ID_STEP);
-    EXPECT_EQ(status(kState), "Paused");
-    EXPECT_EQ(world_.generation(), generation + 4);
-    click(labelled<wxButton>(*panel_, "Run"));
-    EXPECT_EQ(status(kState), "Running");
-    click(labelled<wxButton>(*panel_, "Pause"));
-    EXPECT_EQ(status(kState), "Paused");
+    pressKey(*m_canvas, WXK_SPACE);
+    EXPECT_EQ(status(StatusField::State), "Running");
+    command(StepID);
+    EXPECT_EQ(status(StatusField::State), "Paused");
+    EXPECT_EQ(m_world.generation(), generation + 4);
+    click(labelled<wxButton>(*m_panel, "Run"));
+    EXPECT_EQ(status(StatusField::State), "Running");
+    click(labelled<wxButton>(*m_panel, "Pause"));
+    EXPECT_EQ(status(StatusField::State), "Paused");
 }
 
 TEST_F(GuiSmokeTest, ClearsRandomizesAndDrawsWithTheMouse)
 {
-    command(ID_CLEAR);
-    EXPECT_EQ(world_.population(), 0);
-    EXPECT_EQ(status(kPopulation), "Pop 0");
+    command(ClearID);
+    EXPECT_EQ(m_world.population(), 0);
+    EXPECT_EQ(status(StatusField::Population), "Pop 0");
 
     // Randomize reads the density spin control, which sends nothing itself.
     auto& density = first<wxSpinCtrl>(group("Simulation"));
     density.SetValue(100);
-    command(ID_RANDOMIZE);
-    EXPECT_EQ(world_.population(), world_.extent().cellCount());
+    command(RandomizeID);
+    EXPECT_EQ(m_world.population(), m_world.extent().cellCount());
     density.SetValue(10);
-    click(labelled<wxButton>(*panel_, "Randomize"));
-    EXPECT_NEAR(
-        static_cast<double>(world_.population()) / static_cast<double>(world_.extent().cellCount()),
-        0.10, 0.01);
-    EXPECT_EQ(world_.population(), countedPopulation());
-    EXPECT_EQ(world_.generation(), 0U);
-    click(labelled<wxButton>(*panel_, "Clear"));
-    EXPECT_EQ(world_.population(), 0);
+    click(labelled<wxButton>(*m_panel, "Randomize"));
+    EXPECT_NEAR(static_cast<double>(m_world.population()) /
+                    static_cast<double>(m_world.extent().cellCount()),
+                0.10, 0.01);
+    EXPECT_EQ(m_world.population(), countedPopulation());
+    EXPECT_EQ(m_world.generation(), 0U);
+    click(labelled<wxButton>(*m_panel, "Clear"));
+    EXPECT_EQ(m_world.population(), 0);
 
     // At 8 px a short drag crosses several cells. A left drag from a dead cell draws a line.
     type(first<wxSpinCtrl>(group("View")), 8);
-    ASSERT_EQ(canvas_->cellSize(), 8);
+    ASSERT_EQ(m_canvas->cellSize(), 8);
     const wxPoint                      start     = canvasCentre();
     const wxPoint                      end       = start + wxPoint(40, 16);
     const std::optional<core::CellPos> startCell = pointAt(start);
     ASSERT_TRUE(startCell);
-    mouse(*canvas_, wxEVT_LEFT_DOWN, start);
-    EXPECT_EQ(world_.at(startCell.value()), core::kAlive);
-    EXPECT_EQ(wxWindow::GetCapture(), canvas_);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, start);
+    EXPECT_EQ(m_world.at(startCell.value()), core::kAlive);
+    EXPECT_EQ(wxWindow::GetCapture(), m_canvas);
     const std::optional<core::CellPos> endCell = pointAt(end);
     ASSERT_TRUE(endCell);
-    mouse(*canvas_, wxEVT_LEFT_UP, end);
+    mouse(*m_canvas, wxEVT_LEFT_UP, end);
     EXPECT_EQ(wxWindow::GetCapture(), nullptr);
 
     // The line has no gaps: one cell per step along its longer axis.
@@ -777,128 +778,128 @@ TEST_F(GuiSmokeTest, ClearsRandomizesAndDrawsWithTheMouse)
                                             std::abs(endCell.value().y - startCell.value().y)) +
                                    1;
     EXPECT_GT(length, 2);
-    EXPECT_EQ(world_.population(), length);
-    EXPECT_EQ(world_.at(endCell.value()), core::kAlive);
-    EXPECT_EQ(status(kPopulation), "Pop " + countText(length));
+    EXPECT_EQ(m_world.population(), length);
+    EXPECT_EQ(m_world.at(endCell.value()), core::kAlive);
+    EXPECT_EQ(status(StatusField::Population), "Pop " + countText(length));
 
     // A left press on a live cell erases it; the right button always erases.
-    mouse(*canvas_, wxEVT_LEFT_DOWN, end);
-    mouse(*canvas_, wxEVT_LEFT_UP, end);
-    EXPECT_EQ(world_.at(endCell.value()), core::kDead);
-    mouse(*canvas_, wxEVT_RIGHT_DOWN, start);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, end);
+    mouse(*m_canvas, wxEVT_LEFT_UP, end);
+    EXPECT_EQ(m_world.at(endCell.value()), core::kDead);
+    mouse(*m_canvas, wxEVT_RIGHT_DOWN, start);
     pointAt(end);
-    mouse(*canvas_, wxEVT_RIGHT_UP, end);
-    EXPECT_EQ(world_.population(), 0);
+    mouse(*m_canvas, wxEVT_RIGHT_UP, end);
+    EXPECT_EQ(m_world.population(), 0);
 
     // Esc ends a stroke and releases the mouse.
-    mouse(*canvas_, wxEVT_LEFT_DOWN, start);
-    pressKey(*canvas_, WXK_ESCAPE);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, start);
+    pressKey(*m_canvas, WXK_ESCAPE);
     EXPECT_EQ(wxWindow::GetCapture(), nullptr);
     pointAt(end);
-    EXPECT_EQ(world_.population(), 1);
+    EXPECT_EQ(m_world.population(), 1);
 
     // Shift+left drag pans: the cell under the pointer moves along with it, and nothing is drawn.
-    mouse(*canvas_, wxEVT_LEFT_DOWN, start, wxMOD_SHIFT);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, start, wxMOD_SHIFT);
     pointAt(end);
-    mouse(*canvas_, wxEVT_LEFT_UP, end);
+    mouse(*m_canvas, wxEVT_LEFT_UP, end);
     EXPECT_EQ(pointAt(end), startCell);
-    EXPECT_EQ(world_.population(), 1);
+    EXPECT_EQ(m_world.population(), 1);
 
     // Only the button that started a drag ends it: a right click during a left drag changes
     // nothing.
-    command(ID_CLEAR);
+    command(ClearID);
     const std::optional<core::CellPos> from = pointAt(start);
-    mouse(*canvas_, wxEVT_LEFT_DOWN, start);
-    mouse(*canvas_, wxEVT_RIGHT_DOWN, start);
-    mouse(*canvas_, wxEVT_RIGHT_UP, start);
-    EXPECT_EQ(wxWindow::GetCapture(), canvas_);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, start);
+    mouse(*m_canvas, wxEVT_RIGHT_DOWN, start);
+    mouse(*m_canvas, wxEVT_RIGHT_UP, start);
+    EXPECT_EQ(wxWindow::GetCapture(), m_canvas);
     const std::optional<core::CellPos> to = pointAt(end);
-    mouse(*canvas_, wxEVT_LEFT_UP, end);
+    mouse(*m_canvas, wxEVT_LEFT_UP, end);
     ASSERT_TRUE(from && to);
-    EXPECT_EQ(world_.population(), std::max(std::abs(to.value().x - from.value().x),
-                                            std::abs(to.value().y - from.value().y)) +
-                                       1);
+    EXPECT_EQ(m_world.population(), std::max(std::abs(to.value().x - from.value().x),
+                                             std::abs(to.value().y - from.value().y)) +
+                                        1);
 
     // When the camera moves during a stroke, the stroke goes on from the cell now under the
     // pointer, with no line across the jump.
-    command(ID_CLEAR);
+    command(ClearID);
     const wxPoint                      aside   = canvasCentre() + wxPoint(-100, -60);
     const std::optional<core::CellPos> pressed = pointAt(aside);
-    mouse(*canvas_, wxEVT_LEFT_DOWN, aside);
-    pressKey(*canvas_, 'F');  // fit: the pointer is now over a cell far away
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, aside);
+    pressKey(*m_canvas, 'F');  // fit: the pointer is now over a cell far away
     const std::optional<core::CellPos> jumped = pointAt(aside + wxPoint(1, 0));
-    mouse(*canvas_, wxEVT_LEFT_UP, aside + wxPoint(1, 0));
+    mouse(*m_canvas, wxEVT_LEFT_UP, aside + wxPoint(1, 0));
     ASSERT_TRUE(pressed && jumped);
     EXPECT_GT(std::abs(jumped.value().x - pressed.value().x), 1);
-    EXPECT_EQ(world_.population(), 2);
-    EXPECT_EQ(world_.at(jumped.value()), core::kAlive);
+    EXPECT_EQ(m_world.population(), 2);
+    EXPECT_EQ(m_world.at(jumped.value()), core::kAlive);
 }
 
 TEST_F(GuiSmokeTest, ChangesSpeed)
 {
-    command(ID_FASTER);
-    EXPECT_EQ(panel_->speed().gensPerSecond, 60);
-    EXPECT_EQ(status(kSpeed), "60 gen/s");
-    command(ID_SLOWER);
-    typeChar(*canvas_, '[');
-    EXPECT_EQ(panel_->speed().gensPerSecond, 20);
+    command(FasterID);
+    EXPECT_EQ(m_panel->speed().gensPerSecond, 60);
+    EXPECT_EQ(status(StatusField::Speed), "60 gen/s");
+    command(SlowerID);
+    typeChar(*m_canvas, '[');
+    EXPECT_EQ(m_panel->speed().gensPerSecond, 20);
     // The canvas matches these keys by the typed character. On a German layout ']' is AltGr+9,
     // whose key-down event says '9'.
-    pressKey(*canvas_, '9', wxMOD_ALTGR);
-    typeChar(*canvas_, ']', wxMOD_ALTGR);
-    EXPECT_EQ(panel_->speed().gensPerSecond, 30);
-    typeChar(*canvas_, ']', wxMOD_ALT);  // a plain Alt combination is left to the menus
-    EXPECT_EQ(panel_->speed().gensPerSecond, 30);
+    pressKey(*m_canvas, '9', wxMOD_ALTGR);
+    typeChar(*m_canvas, ']', wxMOD_ALTGR);
+    EXPECT_EQ(m_panel->speed().gensPerSecond, 30);
+    typeChar(*m_canvas, ']', wxMOD_ALT);  // a plain Alt combination is left to the menus
+    EXPECT_EQ(m_panel->speed().gensPerSecond, 30);
 
     // The spin control and the logarithmic slider show the same rate.
     auto& rate   = first<wxSpinCtrl>(group("Speed"));
     auto& slider = first<wxSlider>(group("Speed"));
     type(rate, 1000);
     EXPECT_EQ(slider.GetValue(), core::Speed::kSliderMax);
-    EXPECT_EQ(status(kSpeed), "1000 gen/s");
+    EXPECT_EQ(status(StatusField::Speed), "1000 gen/s");
     drag(slider, 100);  // 10^(100 / 100)
     EXPECT_EQ(rate.GetValue(), 10);
-    EXPECT_EQ(status(kSpeed), "10 gen/s");
+    EXPECT_EQ(status(StatusField::Speed), "10 gen/s");
 
     // Faster from 1000 reaches Max; Slower leaves it and keeps the rate.
     type(rate, 1000);
-    command(ID_FASTER);
-    EXPECT_TRUE(panel_->speed().unlimited);
-    EXPECT_TRUE(menuItem(ID_TOGGLE_MAX_SPEED).IsChecked());
+    command(FasterID);
+    EXPECT_TRUE(m_panel->speed().unlimited);
+    EXPECT_TRUE(menuItem(ToggleMaxSpeedID).IsChecked());
     EXPECT_FALSE(rate.IsEnabled());
-    EXPECT_EQ(status(kSpeed), "Max");
-    command(ID_SLOWER);
-    EXPECT_EQ(panel_->speed(), (core::Speed{.gensPerSecond = 1000}));
+    EXPECT_EQ(status(StatusField::Speed), "Max");
+    command(SlowerID);
+    EXPECT_EQ(m_panel->speed(), (core::Speed{.gensPerSecond = 1000}));
     EXPECT_TRUE(rate.IsEnabled());
 
     // The check box switches Max on. The runner then steps several generations per tick.
     type(rate, 30);
-    toggle(labelled<wxCheckBox>(*panel_, "Max speed"));
-    EXPECT_TRUE(panel_->speed().unlimited);
-    command(ID_RUN_PAUSE);
+    toggle(labelled<wxCheckBox>(*m_panel, "Max speed"));
+    EXPECT_TRUE(m_panel->speed().unlimited);
+    command(RunPauseID);
     runFor(300ms);
-    EXPECT_GT(world_.generation(), 30U);  // one generation per 16 ms tick would give about 19
+    EXPECT_GT(m_world.generation(), 30U);  // one generation per 16 ms tick would give about 19
     // Once the first half-second window has passed, the status bar shows the measured rate.
     const std::regex measuredMax(R"(Max \([1-9][0-9,]* gen/s\))");
-    EXPECT_TRUE(runUntil([&] { return std::regex_match(status(kSpeed), measuredMax); }))
-        << status(kSpeed);
-    command(ID_RUN_PAUSE);
-    EXPECT_EQ(world_.population(), countedPopulation());
+    EXPECT_TRUE(runUntil([&] { return std::regex_match(status(StatusField::Speed), measuredMax); }))
+        << status(StatusField::Speed);
+    command(RunPauseID);
+    EXPECT_EQ(m_world.population(), countedPopulation());
 
-    command(ID_TOGGLE_MAX_SPEED);
-    EXPECT_EQ(panel_->speed(), (core::Speed{.gensPerSecond = 30}));
-    EXPECT_FALSE(menuItem(ID_TOGGLE_MAX_SPEED).IsChecked());
-    EXPECT_EQ(status(kSpeed), "30 gen/s");
+    command(ToggleMaxSpeedID);
+    EXPECT_EQ(m_panel->speed(), (core::Speed{.gensPerSecond = 30}));
+    EXPECT_FALSE(menuItem(ToggleMaxSpeedID).IsChecked());
+    EXPECT_EQ(status(StatusField::Speed), "30 gen/s");
 
     // The frame takes Ctrl+M before any control sees it; in the rule box wxGTK would turn it into
     // Enter.
     auto& ruleText = first<wxTextCtrl>(group("Rule"));
     sendKey(ruleText, wxEVT_CHAR_HOOK, 'M', wxMOD_CONTROL);
-    EXPECT_TRUE(panel_->speed().unlimited);
+    EXPECT_TRUE(m_panel->speed().unlimited);
     sendKey(ruleText, wxEVT_CHAR_HOOK, 'M', wxMOD_CONTROL | wxMOD_SHIFT);  // only plain Ctrl+M
-    EXPECT_TRUE(panel_->speed().unlimited);
-    sendKey(*canvas_, wxEVT_CHAR_HOOK, 'M', wxMOD_CONTROL);
-    EXPECT_FALSE(panel_->speed().unlimited);
+    EXPECT_TRUE(m_panel->speed().unlimited);
+    sendKey(*m_canvas, wxEVT_CHAR_HOOK, 'M', wxMOD_CONTROL);
+    EXPECT_FALSE(m_panel->speed().unlimited);
 }
 
 TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
@@ -909,109 +910,110 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
     // Both ends of the zoom range, painted at each.
     for (std::size_t i = 0; i < render::kZoomSteps.size(); ++i)
     {
-        command(ID_ZOOM_OUT);
+        command(ZoomOutID);
     }
-    EXPECT_EQ(canvas_->cellSize(), render::kMinCellSize);
+    EXPECT_EQ(m_canvas->cellSize(), render::kMinCellSize);
     EXPECT_EQ(cellSize.GetValue(), render::kMinCellSize);
-    EXPECT_TRUE(status(kView).ends_with("· 1 px · grid hidden < 5 px")) << status(kView);
+    EXPECT_TRUE(status(StatusField::View).ends_with("· 1 px · grid hidden < 5 px"))
+        << status(StatusField::View);
     repaint();
     for (std::size_t i = 0; i < render::kZoomSteps.size(); ++i)
     {
-        command(ID_ZOOM_IN);
+        command(ZoomInID);
     }
-    EXPECT_EQ(canvas_->cellSize(), render::kMaxCellSize);
+    EXPECT_EQ(m_canvas->cellSize(), render::kMaxCellSize);
     EXPECT_EQ(cellSize.GetValue(), render::kMaxCellSize);
     EXPECT_EQ(zoomSlider.GetValue(), static_cast<int>(render::kZoomSteps.size() - 1));
-    EXPECT_TRUE(status(kView).ends_with("· 100 px")) << status(kView);
+    EXPECT_TRUE(status(StatusField::View).ends_with("· 100 px")) << status(StatusField::View);
     repaint();
 
     // Centre: the middle cell is under the canvas centre, and both scrollbars sit halfway.
-    command(ID_CENTER_VIEW);
+    command(CenterViewID);
     const std::optional<core::CellPos> middle = pointAt(canvasCentre());
     ASSERT_TRUE(middle);
     EXPECT_NEAR(middle.value().x, 256, 1);
     EXPECT_NEAR(middle.value().y, 256, 1);
     for (const int orientation : {wxHORIZONTAL, wxVERTICAL})
     {
-        const int range = canvas_->GetScrollRange(orientation);  // device pixels, like the thumb
+        const int range = m_canvas->GetScrollRange(orientation);  // device pixels, like the thumb
         EXPECT_EQ(range, 512 * render::kMaxCellSize);
-        EXPECT_EQ(canvas_->GetScrollPos(orientation),
-                  (range - canvas_->GetScrollThumb(orientation)) / 2);
+        EXPECT_EQ(m_canvas->GetScrollPos(orientation),
+                  (range - m_canvas->GetScrollThumb(orientation)) / 2);
     }
 
     // Scrollbar events, then arrow keys, move the view.
-    const int end = canvas_->GetScrollRange(wxVERTICAL) - canvas_->GetScrollThumb(wxVERTICAL);
-    scroll(*canvas_, wxEVT_SCROLLWIN_BOTTOM, wxVERTICAL);
-    scroll(*canvas_, wxEVT_SCROLLWIN_TOP, wxHORIZONTAL);
-    EXPECT_EQ(canvas_->GetScrollPos(wxVERTICAL), end);
-    EXPECT_EQ(canvas_->GetScrollPos(wxHORIZONTAL), 0);
-    const wxPoint bottomLeft{0, canvas_->GetClientSize().y - 1};
+    const int end = m_canvas->GetScrollRange(wxVERTICAL) - m_canvas->GetScrollThumb(wxVERTICAL);
+    scroll(*m_canvas, wxEVT_SCROLLWIN_BOTTOM, wxVERTICAL);
+    scroll(*m_canvas, wxEVT_SCROLLWIN_TOP, wxHORIZONTAL);
+    EXPECT_EQ(m_canvas->GetScrollPos(wxVERTICAL), end);
+    EXPECT_EQ(m_canvas->GetScrollPos(wxHORIZONTAL), 0);
+    const wxPoint bottomLeft{0, m_canvas->GetClientSize().y - 1};
     EXPECT_EQ(pointAt(bottomLeft), (core::CellPos{0, 511}));  // the world's bottom-left cell
-    scroll(*canvas_, wxEVT_SCROLLWIN_THUMBTRACK, wxHORIZONTAL, 1000);
-    EXPECT_EQ(canvas_->GetScrollPos(wxHORIZONTAL), 1000);
-    pressKey(*canvas_, WXK_RIGHT);  // 10% of the canvas width
-    EXPECT_EQ(canvas_->GetScrollPos(wxHORIZONTAL),
-              1000 + (canvas_->GetScrollThumb(wxHORIZONTAL) / 10));
-    pressKey(*canvas_, WXK_PAGEUP);
-    EXPECT_LT(canvas_->GetScrollPos(wxVERTICAL), end);
+    scroll(*m_canvas, wxEVT_SCROLLWIN_THUMBTRACK, wxHORIZONTAL, 1000);
+    EXPECT_EQ(m_canvas->GetScrollPos(wxHORIZONTAL), 1000);
+    pressKey(*m_canvas, WXK_RIGHT);  // 10% of the canvas width
+    EXPECT_EQ(m_canvas->GetScrollPos(wxHORIZONTAL),
+              1000 + (m_canvas->GetScrollThumb(wxHORIZONTAL) / 10));
+    pressKey(*m_canvas, WXK_PAGEUP);
+    EXPECT_LT(m_canvas->GetScrollPos(wxVERTICAL), end);
 
     // Ctrl+Home centres, handled by the canvas itself: GTK's scrolled window would take it from the
     // menu.
-    pressKey(*canvas_, WXK_HOME, wxMOD_CONTROL);
+    pressKey(*m_canvas, WXK_HOME, wxMOD_CONTROL);
     for (const int orientation : {wxHORIZONTAL, wxVERTICAL})
     {
         const int centred =
-            (canvas_->GetScrollRange(orientation) - canvas_->GetScrollThumb(orientation)) / 2;
-        EXPECT_EQ(canvas_->GetScrollPos(orientation), centred);
+            (m_canvas->GetScrollRange(orientation) - m_canvas->GetScrollThumb(orientation)) / 2;
+        EXPECT_EQ(m_canvas->GetScrollPos(orientation), centred);
     }
 
     // Fit shows the whole world, from the menu, the F key and the panel button alike.
-    command(ID_ZOOM_FIT);
+    command(ZoomFitID);
     const int fitted = fittedCellSize();
-    EXPECT_EQ(canvas_->cellSize(), fitted);
-    typeChar(*canvas_, '+');
-    const int zoomedIn = canvas_->cellSize();
+    EXPECT_EQ(m_canvas->cellSize(), fitted);
+    typeChar(*m_canvas, '+');
+    const int zoomedIn = m_canvas->cellSize();
     EXPECT_GT(zoomedIn, fitted);
-    typeChar(*canvas_, '=');
-    typeChar(*canvas_, '-');
-    EXPECT_EQ(canvas_->cellSize(), zoomedIn);
-    pressKey(*canvas_, 'F');
-    EXPECT_EQ(canvas_->cellSize(), fitted);
-    pressKey(*canvas_, WXK_NUMPAD_ADD);
-    click(labelled<wxButton>(*panel_, "Fit"));
-    EXPECT_EQ(canvas_->cellSize(), fitted);
+    typeChar(*m_canvas, '=');
+    typeChar(*m_canvas, '-');
+    EXPECT_EQ(m_canvas->cellSize(), zoomedIn);
+    pressKey(*m_canvas, 'F');
+    EXPECT_EQ(m_canvas->cellSize(), fitted);
+    pressKey(*m_canvas, WXK_NUMPAD_ADD);
+    click(labelled<wxButton>(*m_panel, "Fit"));
+    EXPECT_EQ(m_canvas->cellSize(), fitted);
     EXPECT_EQ(cellSize.GetValue(), fitted);
 
     // The spin control takes any size; the slider moves along the zoom steps.
     type(cellSize, 37);
-    EXPECT_EQ(canvas_->cellSize(), 37);
+    EXPECT_EQ(m_canvas->cellSize(), 37);
     EXPECT_EQ(zoomSlider.GetValue(), static_cast<int>(render::nearestZoomStep(37)));
     drag(zoomSlider, 3);
-    EXPECT_EQ(canvas_->cellSize(), render::kZoomSteps[3]);
+    EXPECT_EQ(m_canvas->cellSize(), render::kZoomSteps[3]);
     EXPECT_EQ(cellSize.GetValue(), render::kZoomSteps[3]);
 
     // Ctrl+wheel zooms at the pointer, which stays over the same cell.
     type(cellSize, 16);
-    pressKey(*canvas_, 'C');
+    pressKey(*m_canvas, 'C');
     const wxPoint                      pointer = canvasCentre() + wxPoint(37, -23);
     const std::optional<core::CellPos> cell    = pointAt(pointer);
     ASSERT_TRUE(cell);
-    turnWheel(*canvas_, pointer, 1, wxMOD_CONTROL);
-    EXPECT_EQ(canvas_->cellSize(), 20);
+    turnWheel(*m_canvas, pointer, 1, wxMOD_CONTROL);
+    EXPECT_EQ(m_canvas->cellSize(), 20);
     EXPECT_EQ(pointAt(pointer), cell);
-    turnWheel(*canvas_, pointer, -2, wxMOD_CONTROL);
-    EXPECT_EQ(canvas_->cellSize(), 12);
+    turnWheel(*m_canvas, pointer, -2, wxMOD_CONTROL);
+    EXPECT_EQ(m_canvas->cellSize(), 12);
     EXPECT_EQ(pointAt(pointer), cell);
 
     // A plain wheel notch down scrolls 3 lines of max(cell size, 16) px.
-    const int top = canvas_->GetScrollPos(wxVERTICAL);
-    turnWheel(*canvas_, pointer, -1);
-    EXPECT_EQ(canvas_->GetScrollPos(wxVERTICAL), top + (3 * 16));
+    const int top = m_canvas->GetScrollPos(wxVERTICAL);
+    turnWheel(*m_canvas, pointer, -1);
+    EXPECT_EQ(m_canvas->GetScrollPos(wxVERTICAL), top + (3 * 16));
 
     // Ctrl and a key belong to the menu accelerators, so the canvas ignores it.
-    pressKey(*canvas_, '+', wxMOD_CONTROL);
-    typeChar(*canvas_, '+', wxMOD_CONTROL);
-    EXPECT_EQ(canvas_->cellSize(), 12);
+    pressKey(*m_canvas, '+', wxMOD_CONTROL);
+    typeChar(*m_canvas, '+', wxMOD_CONTROL);
+    EXPECT_EQ(m_canvas->cellSize(), 12);
 
     // When the view moves under a resting pointer, the status bar shows the cell now under it.
     const auto expectHoverFollows = [&](const std::function<void()>& moveView) {
@@ -1022,55 +1024,56 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
         EXPECT_NE(under, before);
         EXPECT_EQ(shown, under);
     };
-    expectHoverFollows([&] { command(ID_ZOOM_IN); });
-    expectHoverFollows([&] { pressKey(*canvas_, WXK_DOWN); });
-    expectHoverFollows([&] { scroll(*canvas_, wxEVT_SCROLLWIN_PAGEUP, wxVERTICAL); });
+    expectHoverFollows([&] { command(ZoomInID); });
+    expectHoverFollows([&] { pressKey(*m_canvas, WXK_DOWN); });
+    expectHoverFollows([&] { scroll(*m_canvas, wxEVT_SCROLLWIN_PAGEUP, wxVERTICAL); });
 }
 
 TEST_F(GuiSmokeTest, TogglesGridLinesAndWrapping)
 {
     // Below 5 px the lines would hide the cells, and the status bar says why none are drawn.
-    auto& gridLines = labelled<wxCheckBox>(*panel_, "Grid lines");
+    auto& gridLines = labelled<wxCheckBox>(*m_panel, "Grid lines");
     type(first<wxSpinCtrl>(group("View")), 4);
-    EXPECT_TRUE(status(kView).ends_with("· 4 px · grid hidden < 5 px")) << status(kView);
-    command(ID_TOGGLE_GRID);
-    EXPECT_FALSE(canvas_->showGrid());
+    EXPECT_TRUE(status(StatusField::View).ends_with("· 4 px · grid hidden < 5 px"))
+        << status(StatusField::View);
+    command(ToggleGridID);
+    EXPECT_FALSE(m_canvas->showGrid());
     EXPECT_FALSE(gridLines.GetValue());
-    EXPECT_FALSE(menuItem(ID_TOGGLE_GRID).IsChecked());
-    EXPECT_TRUE(status(kView).ends_with("· 4 px")) << status(kView);
-    pressKey(*canvas_, 'G');
-    EXPECT_TRUE(canvas_->showGrid());
-    EXPECT_TRUE(menuItem(ID_TOGGLE_GRID).IsChecked());
+    EXPECT_FALSE(menuItem(ToggleGridID).IsChecked());
+    EXPECT_TRUE(status(StatusField::View).ends_with("· 4 px")) << status(StatusField::View);
+    pressKey(*m_canvas, 'G');
+    EXPECT_TRUE(m_canvas->showGrid());
+    EXPECT_TRUE(menuItem(ToggleGridID).IsChecked());
 
     // At 20 px, paint once with grid lines and once without.
     type(first<wxSpinCtrl>(group("View")), 20);
     repaint();
     toggle(gridLines);
-    EXPECT_FALSE(canvas_->showGrid());
+    EXPECT_FALSE(m_canvas->showGrid());
     repaint();
 
     // A theme-change event keeps the grid setting and leaves the colours of the current theme. (The
     // desktop theme itself does not change here, so this cannot tell whether the colours are picked
     // again.)
     wxSysColourChangedEvent themeChanged;
-    deliver(*frame_, themeChanged);
-    EXPECT_FALSE(canvas_->showGrid());
-    EXPECT_EQ(canvas_->style().outside, themeStyle().outside);
+    deliver(*m_frame, themeChanged);
+    EXPECT_FALSE(m_canvas->showGrid());
+    EXPECT_EQ(m_canvas->style().outside, themeStyle().outside);
     repaint();
 
     // Wrap edges switches the world's topology.
-    auto& wrap = labelled<wxCheckBox>(*panel_, "Wrap edges");
-    command(ID_TOGGLE_WRAP);
-    EXPECT_EQ(world_.topology(), core::Topology::Bounded);
+    auto& wrap = labelled<wxCheckBox>(*m_panel, "Wrap edges");
+    command(ToggleWrapID);
+    EXPECT_EQ(m_world.topology(), core::Topology::Bounded);
     EXPECT_FALSE(wrap.GetValue());
-    EXPECT_FALSE(menuItem(ID_TOGGLE_WRAP).IsChecked());
-    EXPECT_EQ(status(kWorld), "512 × 512 · bounded · B3/S23 · Banded");
-    pressKey(*canvas_, 'W');
-    EXPECT_EQ(world_.topology(), core::Topology::Torus);
+    EXPECT_FALSE(menuItem(ToggleWrapID).IsChecked());
+    EXPECT_EQ(status(StatusField::World), "512 × 512 · bounded · B3/S23 · Banded");
+    pressKey(*m_canvas, 'W');
+    EXPECT_EQ(m_world.topology(), core::Topology::Torus);
     EXPECT_TRUE(wrap.GetValue());
     toggle(wrap);
-    EXPECT_EQ(world_.topology(), core::Topology::Bounded);
-    EXPECT_FALSE(menuItem(ID_TOGGLE_WRAP).IsChecked());
+    EXPECT_EQ(m_world.topology(), core::Topology::Bounded);
+    EXPECT_FALSE(menuItem(ToggleWrapID).IsChecked());
 }
 
 TEST_F(GuiSmokeTest, AppliesPresetAndTypedRules)
@@ -1079,24 +1082,24 @@ TEST_F(GuiSmokeTest, AppliesPresetAndTypedRules)
     auto& ruleText = first<wxTextCtrl>(group("Rule"));
 
     choose(presets, 1);
-    EXPECT_EQ(world_.rule(), core::kRulePresets[1].rule);  // HighLife
-    EXPECT_EQ(panel_->ruleText(), "B36/S23");
-    EXPECT_EQ(status(kWorld), "512 × 512 · torus · B36/S23 · Banded");
+    EXPECT_EQ(m_world.rule(), core::kRulePresets[1].rule);  // HighLife
+    EXPECT_EQ(m_panel->ruleText(), "B36/S23");
+    EXPECT_EQ(status(StatusField::World), "512 × 512 · torus · B36/S23 · Banded");
 
     // Typed text, confirmed with Enter, is shown in canonical form, with its preset selected.
     typeAndEnter(ruleText, " s34678/b3678 ");
-    EXPECT_EQ(world_.rule().toString(), "B3678/S34678");
-    EXPECT_EQ(panel_->ruleText(), "B3678/S34678");
+    EXPECT_EQ(m_world.rule().toString(), "B3678/S34678");
+    EXPECT_EQ(m_panel->ruleText(), "B3678/S34678");
     EXPECT_EQ(toUtf8(presets.GetStringSelection()), "Day & Night");
 
     // A rule without a preset, applied with the button, shows "Custom"; choosing "Custom" does
     // nothing.
     ruleText.ChangeValue("B2/S34");
-    click(labelled<wxButton>(*panel_, "Apply"));
-    EXPECT_EQ(world_.rule().toString(), "B2/S34");
+    click(labelled<wxButton>(*m_panel, "Apply"));
+    EXPECT_EQ(m_world.rule().toString(), "B2/S34");
     EXPECT_EQ(toUtf8(presets.GetStringSelection()), "Custom");
-    command(ID_RULE_PRESET);
-    EXPECT_EQ(world_.rule().toString(), "B2/S34");
+    command(RulePresetID);
+    EXPECT_EQ(m_world.rule().toString(), "B2/S34");
 
     // Invalid text leaves the rule alone, stays in the box for fixing, and the error line explains
     // it.
@@ -1113,114 +1116,113 @@ TEST_F(GuiSmokeTest, AppliesPresetAndTypedRules)
     for (const BadRule& bad : badRules)
     {
         typeAndEnter(ruleText, bad.text);
-        EXPECT_EQ(world_.rule().toString(), "B2/S34");
-        EXPECT_EQ(panel_->ruleText(), bad.text);
+        EXPECT_EQ(m_world.rule().toString(), "B2/S34");
+        EXPECT_EQ(m_panel->ruleText(), bad.text);
         EXPECT_TRUE(errorLine.IsShown());
         std::string message = toUtf8(errorLine.GetLabelText());
         std::ranges::replace(message, '\n', ' ');  // the panel wraps long messages
         EXPECT_EQ(message, core::describe(bad.error));
     }
     typeAndEnter(ruleText, "B3/S23");
-    EXPECT_EQ(world_.rule(), core::Rule{});
+    EXPECT_EQ(m_world.rule(), core::Rule{});
     EXPECT_FALSE(errorLine.IsShown());
-    EXPECT_EQ(panel_->selectedPreset(), 0U);
+    EXPECT_EQ(m_panel->selectedPreset(), 0U);
 
     // Edit Rule… moves the keyboard focus into the text box and selects the text.
-    command(ID_FOCUS_RULE);
+    command(FocusRuleID);
     EXPECT_EQ(wxWindow::FindFocus(), &ruleText);
     EXPECT_EQ(toUtf8(ruleText.GetStringSelection()), "B3/S23");
 
     // Apply keeps the focus in the rule box. Other panel buttons and check boxes hand it to the
     // canvas: GTK leaves it on the clicked control, and Space would then press that control again.
-    click(labelled<wxButton>(*panel_, "Apply"));
+    click(labelled<wxButton>(*m_panel, "Apply"));
     EXPECT_EQ(wxWindow::FindFocus(), &ruleText);
-    toggle(labelled<wxCheckBox>(*panel_, "Wrap edges"));
-    EXPECT_EQ(wxWindow::FindFocus(), canvas_);
-    command(ID_FOCUS_RULE);
-    click(labelled<wxButton>(*panel_, "Randomize"));
-    EXPECT_EQ(wxWindow::FindFocus(), canvas_);
+    toggle(labelled<wxCheckBox>(*m_panel, "Wrap edges"));
+    EXPECT_EQ(wxWindow::FindFocus(), m_canvas);
+    command(FocusRuleID);
+    click(labelled<wxButton>(*m_panel, "Randomize"));
+    EXPECT_EQ(wxWindow::FindFocus(), m_canvas);
 }
 
 TEST_F(GuiSmokeTest, SwitchesEngines)
 {
-    command(ID_ENGINE_REFERENCE);
-    EXPECT_EQ(world_.stepper().kind(), core::StepperKind::Reference);
-    EXPECT_TRUE(menuItem(ID_ENGINE_REFERENCE).IsChecked());
-    EXPECT_TRUE(status(kWorld).ends_with("· Reference"));
-    command(ID_STEP);
-    command(ID_STEP);
-    EXPECT_EQ(world_.generation(), 2U);
-    EXPECT_EQ(world_.population(), countedPopulation());
+    command(EngineReferenceID);
+    EXPECT_EQ(m_world.stepper().kind(), core::StepperKind::Reference);
+    EXPECT_TRUE(menuItem(EngineReferenceID).IsChecked());
+    EXPECT_TRUE(status(StatusField::World).ends_with("· Reference"));
+    command(StepID);
+    command(StepID);
+    EXPECT_EQ(m_world.generation(), 2U);
+    EXPECT_EQ(m_world.population(), countedPopulation());
 
-    command(ID_ENGINE_BANDED);
-    EXPECT_EQ(world_.stepper().kind(), core::StepperKind::Banded);
-    EXPECT_TRUE(menuItem(ID_ENGINE_BANDED).IsChecked());
-    EXPECT_TRUE(status(kWorld).ends_with("· Banded"));
-    command(ID_STEP);
-    EXPECT_EQ(world_.generation(), 3U);  // the engine switch keeps the state
-    EXPECT_EQ(world_.population(), countedPopulation());
+    command(EngineBandedID);
+    EXPECT_EQ(m_world.stepper().kind(), core::StepperKind::Banded);
+    EXPECT_TRUE(menuItem(EngineBandedID).IsChecked());
+    EXPECT_TRUE(status(StatusField::World).ends_with("· Banded"));
+    command(StepID);
+    EXPECT_EQ(m_world.generation(), 3U);  // the engine switch keeps the state
+    EXPECT_EQ(m_world.population(), countedPopulation());
 }
 
 TEST_F(GuiSmokeTest, SwitchesAutomata)
 {
-    command(ID_AUTOMATON_ANT);
-    EXPECT_EQ(world_.automaton(), core::Automaton::LangtonAnt);
-    EXPECT_TRUE(menuItem(ID_AUTOMATON_ANT).IsChecked());
-    ASSERT_EQ(world_.ants().size(), 1U);  // switching over puts one ant in the middle
-    EXPECT_EQ(world_.ants()[0], core::defaultAnt(0, 1, world_.extent()));
-    EXPECT_EQ(status(kWorld), "512 × 512 · Langton's ant · 1 ant");
+    command(AutomatonAntID);
+    EXPECT_EQ(m_world.automaton(), core::Automaton::LangtonAnt);
+    EXPECT_TRUE(menuItem(AutomatonAntID).IsChecked());
+    ASSERT_EQ(m_world.ants().size(), 1U);  // switching over puts one ant in the middle
+    EXPECT_EQ(m_world.ants()[0], core::defaultAnt(0, 1, m_world.extent()));
+    EXPECT_EQ(status(StatusField::World), "512 × 512 · Langton's ant · 1 ant");
 
     // The ant reads no rule, no topology and no engine, so all three are greyed out.
-    EXPECT_FALSE(menuItem(ID_TOGGLE_WRAP).IsEnabled());
-    EXPECT_FALSE(menuItem(ID_FOCUS_RULE).IsEnabled());
-    EXPECT_FALSE(menuItem(ID_ENGINE_BANDED).IsEnabled());
-    EXPECT_FALSE(menuItem(ID_ENGINE_REFERENCE).IsEnabled());
-    EXPECT_TRUE(menuItem(ID_RESET_ANTS).IsEnabled());
-    EXPECT_FALSE(labelled<wxCheckBox>(*panel_, "Wrap edges").IsEnabled());
+    EXPECT_FALSE(menuItem(ToggleWrapID).IsEnabled());
+    EXPECT_FALSE(menuItem(FocusRuleID).IsEnabled());
+    EXPECT_FALSE(menuItem(EngineBandedID).IsEnabled());
+    EXPECT_FALSE(menuItem(EngineReferenceID).IsEnabled());
+    EXPECT_TRUE(menuItem(ResetAntsID).IsEnabled());
+    EXPECT_FALSE(labelled<wxCheckBox>(*m_panel, "Wrap edges").IsEnabled());
     EXPECT_FALSE(group("Rule").IsEnabled());
 
-    const core::CellCount before = world_.population();
-    command(ID_STEP);
-    EXPECT_EQ(world_.generation(), 1U);
-    EXPECT_EQ(world_.population(), countedPopulation());
-    EXPECT_NE(world_.population(), before);  // the ant flipped the cell it stood on
-    EXPECT_NE(world_.ants()[0].position, core::defaultAnt(0, 1, world_.extent()).position);
+    const core::CellCount before = m_world.population();
+    command(StepID);
+    EXPECT_EQ(m_world.generation(), 1U);
+    EXPECT_EQ(m_world.population(), countedPopulation());
+    EXPECT_NE(m_world.population(), before);  // the ant flipped the cell it stood on
+    EXPECT_NE(m_world.ants()[0].position, core::defaultAnt(0, 1, m_world.extent()).position);
 
-    command(ID_AUTOMATON_LIFE);
-    EXPECT_EQ(world_.automaton(), core::Automaton::Life);
-    EXPECT_TRUE(menuItem(ID_AUTOMATON_LIFE).IsChecked());
-    EXPECT_TRUE(status(kWorld).ends_with("· B3/S23 · Banded"));
-    EXPECT_TRUE(menuItem(ID_TOGGLE_WRAP).IsEnabled());
-    EXPECT_TRUE(menuItem(ID_ENGINE_BANDED).IsEnabled());
+    command(AutomatonLifeID);
+    EXPECT_EQ(m_world.automaton(), core::Automaton::Life);
+    EXPECT_TRUE(menuItem(AutomatonLifeID).IsChecked());
+    EXPECT_TRUE(status(StatusField::World).ends_with("· B3/S23 · Banded"));
+    EXPECT_TRUE(menuItem(ToggleWrapID).IsEnabled());
+    EXPECT_TRUE(menuItem(EngineBandedID).IsEnabled());
     EXPECT_TRUE(group("Rule").IsEnabled());
-    command(ID_STEP);
-    EXPECT_EQ(world_.generation(), 2U);  // the switch keeps the state
-    EXPECT_EQ(world_.population(), countedPopulation());
+    command(StepID);
+    EXPECT_EQ(m_world.generation(), 2U);  // the switch keeps the state
+    EXPECT_EQ(m_world.population(), countedPopulation());
 }
 
 TEST_F(GuiSmokeTest, PlacesAntsFromTheMenuAndWithCtrlClick)
 {
-    command(ID_AUTOMATON_ANT);
+    command(AutomatonAntID);
     // The ant count is the group's second spin control; the first is the randomize density.
     const std::vector<wxSpinCtrl*> spins = all<wxSpinCtrl>(group("Simulation"));
     ASSERT_EQ(spins.size(), 2U);
     wxSpinCtrl& antCount = *spins.at(1);
 
     type(antCount, 3);
-    ASSERT_EQ(world_.ants().size(), 3U);
+    ASSERT_EQ(m_world.ants().size(), 3U);
     for (std::size_t i = 0; i < 3; ++i)
     {
-        EXPECT_EQ(world_.ants()[i], core::defaultAnt(static_cast<int>(i), 3, world_.extent()))
+        EXPECT_EQ(m_world.ants()[i], core::defaultAnt(static_cast<int>(i), 3, m_world.extent()))
             << "ant " << i;
     }
-    EXPECT_EQ(status(kWorld), "512 × 512 · Langton's ant · 3 ants");
+    EXPECT_EQ(status(StatusField::World), "512 × 512 · Langton's ant · 3 ants");
 
-    command(ID_STEP);
-    EXPECT_NE(world_.ants()[0], core::defaultAnt(0, 3, world_.extent()));
-    command(
-        ID_RESET_ANTS);  // Edit -> Reset Ants puts them back without changing how many there are
-    ASSERT_EQ(world_.ants().size(), 3U);
-    EXPECT_EQ(world_.ants()[0], core::defaultAnt(0, 3, world_.extent()));
+    command(StepID);
+    EXPECT_NE(m_world.ants()[0], core::defaultAnt(0, 3, m_world.extent()));
+    command(ResetAntsID);  // Edit -> Reset Ants puts them back without changing how many there are
+    ASSERT_EQ(m_world.ants().size(), 3U);
+    EXPECT_EQ(m_world.ants()[0], core::defaultAnt(0, 3, m_world.extent()));
 
     // Ctrl+left click adds an ant where it points and never draws a cell. The ants share the middle
     // row, so a cell below it is free and the click adds one instead of taking that one away.
@@ -1228,61 +1230,61 @@ TEST_F(GuiSmokeTest, PlacesAntsFromTheMenuAndWithCtrlClick)
     const std::optional<core::CellPos> cell = pointAt(at);
     ASSERT_TRUE(cell.has_value());
     ASSERT_FALSE(std::ranges::any_of(
-        world_.ants(), [&](const core::Ant& ant) { return ant.position == cell.value(); }));
-    const core::CellCount population = world_.population();
-    mouse(*canvas_, wxEVT_LEFT_DOWN, at, wxMOD_CONTROL);
-    mouse(*canvas_, wxEVT_LEFT_UP, at, wxMOD_CONTROL);
-    ASSERT_EQ(world_.ants().size(), 4U);
-    EXPECT_EQ(world_.ants()[3], (core::Ant{cell.value(), core::Heading::North}));
-    EXPECT_EQ(world_.population(), population);  // no stroke was drawn
-    EXPECT_EQ(wxWindow::GetCapture(), nullptr);  // and no drag was started
-    EXPECT_EQ(antCount.GetValue(), 4);           // the panel follows the model
-    EXPECT_EQ(status(kWorld), "512 × 512 · Langton's ant · 4 ants");
+        m_world.ants(), [&](const core::Ant& ant) { return ant.position == cell.value(); }));
+    const core::CellCount population = m_world.population();
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, at, wxMOD_CONTROL);
+    mouse(*m_canvas, wxEVT_LEFT_UP, at, wxMOD_CONTROL);
+    ASSERT_EQ(m_world.ants().size(), 4U);
+    EXPECT_EQ(m_world.ants()[3], (core::Ant{cell.value(), core::Heading::North}));
+    EXPECT_EQ(m_world.population(), population);  // no stroke was drawn
+    EXPECT_EQ(wxWindow::GetCapture(), nullptr);   // and no drag was started
+    EXPECT_EQ(antCount.GetValue(), 4);            // the panel follows the model
+    EXPECT_EQ(status(StatusField::World), "512 × 512 · Langton's ant · 4 ants");
 
     // Clicking the same cell again takes it away.
-    mouse(*canvas_, wxEVT_LEFT_DOWN, at, wxMOD_CONTROL);
-    mouse(*canvas_, wxEVT_LEFT_UP, at, wxMOD_CONTROL);
-    EXPECT_EQ(world_.ants().size(), 3U);
-    EXPECT_EQ(world_.population(), population);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, at, wxMOD_CONTROL);
+    mouse(*m_canvas, wxEVT_LEFT_UP, at, wxMOD_CONTROL);
+    EXPECT_EQ(m_world.ants().size(), 3U);
+    EXPECT_EQ(m_world.population(), population);
 }
 
 TEST_F(GuiSmokeTest, ResizesTheWorldThroughTheSizeDialog)
 {
     DialogAnswers answers;
-    command(ID_ENGINE_REFERENCE);
-    command(ID_RUN_PAUSE);
+    command(EngineReferenceID);
+    command(RunPauseID);
 
     // Grow to 1001 × 1000, keeping the pattern. That is too large for the Reference engine.
-    const core::CellCount population = world_.population();
-    const std::uint64_t   generation = world_.generation();
+    const core::CellCount population = m_world.population();
+    const std::uint64_t   generation = m_world.generation();
     answers.worldSize                = DialogAnswers::SizeEntry{.width = "1001", .height = "1000"};
-    command(ID_WORLD_SIZE);
+    command(WorldSizeID);
     EXPECT_EQ(answers.titles, std::vector<std::string>{"World Size"});
-    EXPECT_EQ(world_.extent(), (core::Extent{1001, 1000}));
-    EXPECT_EQ(world_.population(), population);
-    EXPECT_EQ(world_.stepper().kind(), core::StepperKind::Banded);
-    EXPECT_TRUE(menuItem(ID_ENGINE_BANDED).IsChecked());
-    EXPECT_FALSE(menuItem(ID_ENGINE_REFERENCE).IsEnabled());
-    EXPECT_EQ(status(kWorld), "1,001 × 1,000 · torus · B3/S23 · Banded");
+    EXPECT_EQ(m_world.extent(), (core::Extent{1001, 1000}));
+    EXPECT_EQ(m_world.population(), population);
+    EXPECT_EQ(m_world.stepper().kind(), core::StepperKind::Banded);
+    EXPECT_TRUE(menuItem(EngineBandedID).IsChecked());
+    EXPECT_FALSE(menuItem(EngineReferenceID).IsEnabled());
+    EXPECT_EQ(status(StatusField::World), "1,001 × 1,000 · torus · B3/S23 · Banded");
     const std::string worldInfo =
-        "1,001 × 1,000 cells\n" + core::formatBytes(core::worldBytes(world_.extent()));
-    EXPECT_NE(wxWindow::FindWindowByLabel(toWx(worldInfo), panel_), nullptr);
-    EXPECT_EQ(canvas_->cellSize(), fittedCellSize());
+        "1,001 × 1,000 cells\n" + core::formatBytes(core::worldBytes(m_world.extent()));
+    EXPECT_NE(wxWindow::FindWindowByLabel(toWx(worldInfo), m_panel), nullptr);
+    EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
     repaint();
 
     // The simulation keeps running in the larger world.
-    EXPECT_EQ(status(kState), "Running");
-    EXPECT_TRUE(runUntil([&] { return world_.generation() > generation; }));
+    EXPECT_EQ(status(StatusField::State), "Running");
+    EXPECT_TRUE(runUntil([&] { return m_world.generation() > generation; }));
 
     // The Reference engine stays off while the world is too large for it.
-    command(ID_ENGINE_REFERENCE);
-    EXPECT_EQ(world_.stepper().kind(), core::StepperKind::Banded);
-    EXPECT_TRUE(menuItem(ID_ENGINE_BANDED).IsChecked());
+    command(EngineReferenceID);
+    EXPECT_EQ(m_world.stepper().kind(), core::StepperKind::Banded);
+    EXPECT_TRUE(menuItem(EngineBandedID).IsChecked());
 
     // Cancel changes nothing, and neither does an invalid size: the dialog explains it, disables OK
     // and refuses Enter. The typed text counts, not the value a number box would clamp it to.
     answers.worldSize.reset();
-    command(ID_WORLD_SIZE);
+    command(WorldSizeID);
     const core::Extent largest{.width = core::kMaxWorldSide, .height = core::kMaxWorldSide};
     const std::string  tooSmall = core::describe(core::ExtentError::TooSmall, {}, 0);
     const std::string  notWhole = "Width and height must be whole numbers.";
@@ -1298,60 +1300,60 @@ TEST_F(GuiSmokeTest, ResizesTheWorldThroughTheSizeDialog)
     for (const auto& [width, height, message] : invalidSizes)
     {
         answers.worldSize = DialogAnswers::SizeEntry{.width = width, .height = height};
-        command(ID_WORLD_SIZE);
+        command(WorldSizeID);
         EXPECT_TRUE(std::ranges::contains(answers.sizeTexts, message)) << width << " × " << height;
     }
     EXPECT_EQ(answers.titles.size(), 2 + invalidSizes.size());
-    EXPECT_EQ(world_.extent(), (core::Extent{1001, 1000}));
+    EXPECT_EQ(m_world.extent(), (core::Extent{1001, 1000}));
 
     // The smallest world, without the pattern: empty, generation 0, and fitted at the largest cell
     // size. The status bar shows the one cell, now under the resting pointer.
-    command(ID_RUN_PAUSE);
+    command(RunPauseID);
     pointAt(canvasCentre());
     answers.worldSize = DialogAnswers::SizeEntry{.width = "1", .height = "1", .keepPattern = false};
-    click(labelled<wxButton>(*panel_, "Resize…"));
-    EXPECT_EQ(world_.extent(), (core::Extent{1, 1}));
-    EXPECT_EQ(world_.population(), 0);
-    EXPECT_EQ(world_.generation(), 0U);
-    EXPECT_EQ(status(kState), "Paused");
-    EXPECT_EQ(canvas_->cellSize(), render::kMaxCellSize);
+    click(labelled<wxButton>(*m_panel, "Resize…"));
+    EXPECT_EQ(m_world.extent(), (core::Extent{1, 1}));
+    EXPECT_EQ(m_world.population(), 0);
+    EXPECT_EQ(m_world.generation(), 0U);
+    EXPECT_EQ(status(StatusField::State), "Paused");
+    EXPECT_EQ(m_canvas->cellSize(), render::kMaxCellSize);
     EXPECT_EQ(hoveredCell(), (core::CellPos{0, 0}));
     repaint();
-    mouse(*canvas_, wxEVT_LEFT_DOWN, canvasCentre());
-    mouse(*canvas_, wxEVT_LEFT_UP, canvasCentre());
-    EXPECT_EQ(world_.population(), 1);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, canvasCentre());
+    mouse(*m_canvas, wxEVT_LEFT_UP, canvasCentre());
+    EXPECT_EQ(m_world.population(), 1);
 
     // Reference is allowed again. On a 1 × 1 torus the cell is its own eight neighbours, so it
     // dies.
-    command(ID_ENGINE_REFERENCE);
-    EXPECT_EQ(world_.stepper().kind(), core::StepperKind::Reference);
-    command(ID_STEP);
-    EXPECT_EQ(world_.population(), 0);
+    command(EngineReferenceID);
+    EXPECT_EQ(m_world.stepper().kind(), core::StepperKind::Reference);
+    command(StepID);
+    EXPECT_EQ(m_world.population(), 0);
 
     // The keyboard help is a modal message box too.
-    command(ID_SHOW_CONTROLS_HELP);
+    command(ShowControlsHelpID);
     EXPECT_EQ(answers.titles.back(), "Keyboard and Mouse");
 }
 
 TEST_F(GuiSmokeTest, QuitsCleanlyInTheMiddleOfAStroke)
 {
-    command(ID_RUN_PAUSE);
+    command(RunPauseID);
     runFor(100ms);
-    mouse(*canvas_, wxEVT_LEFT_DOWN, canvasCentre());
-    ASSERT_EQ(wxWindow::GetCapture(), canvas_);
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, canvasCentre());
+    ASSERT_EQ(wxWindow::GetCapture(), m_canvas);
 
     // File → Quit. The frame lets go of the mouse at once; wx deletes the frame when the loop is
     // idle.
     wxCommandEvent quit(wxEVT_MENU, wxID_EXIT);
-    deliver(*frame_, quit);
+    deliver(*m_frame, quit);
     EXPECT_EQ(wxWindow::GetCapture(), nullptr);
-    EXPECT_TRUE(runUntil([this] { return !frame_; }));
+    EXPECT_TRUE(runUntil([this] { return !m_frame; }));
 
     // The World outlives the frame, and nothing steps it any more.
-    const std::uint64_t generation = world_.generation();
+    const std::uint64_t generation = m_world.generation();
     runFor(100ms);
-    EXPECT_EQ(world_.generation(), generation);
-    EXPECT_EQ(world_.population(), countedPopulation());
+    EXPECT_EQ(m_world.generation(), generation);
+    EXPECT_EQ(m_world.population(), countedPopulation());
 }
 
 }  // namespace

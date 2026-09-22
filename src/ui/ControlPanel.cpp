@@ -94,9 +94,9 @@ ControlPanel::ControlPanel(wxWindow* parent)
 
     // GTK changes these controls under the wheel even without the focus, so scrolling the panel
     // would silently change values. A consumed wheel event never reaches GTK.
-    for (wxWindow* control :
-         std::initializer_list<wxWindow*>{automaton_, density_, antCount_, speedSlider_, speedSpin_,
-                                          cellSizeSlider_, cellSizeSpin_, rulePreset_})
+    for (wxWindow* control : std::initializer_list<wxWindow*>{
+             m_automaton, m_density, m_antCount, m_speedSlider, m_speedSpin, m_cellSizeSlider,
+             m_cellSizeSpin, m_rulePreset})
     {
         control->Bind(wxEVT_MOUSEWHEEL, [control](wxMouseEvent& event) {
             if (control->HasFocus())
@@ -109,28 +109,27 @@ ControlPanel::ControlPanel(wxWindow* parent)
 
 void ControlPanel::setRunning(bool running)
 {
-    runPause_->SetLabel(running ? "Pause" : "Run");
+    m_runPause->SetLabel(running ? "Pause" : "Run");
 }
 
 // Setters use SetValue/SetSelection/ChangeValue, which never emit events, so there are no
 // feedback loops.
 void ControlPanel::setAutomaton(core::Automaton automaton)
 {
-    const auto* const found = std::ranges::find(core::kAutomata, automaton);
-    automaton_->SetSelection(
-        static_cast<int>(std::ranges::distance(core::kAutomata.begin(), found)));
+    m_automaton->SetSelection(static_cast<int>(std::ranges::distance(
+        core::kAutomata.begin(), std::ranges::find(core::kAutomata, automaton))));
 
     // Each automaton greys out what only the other one uses, so a dead control is visible as such.
     const bool life = automaton == core::Automaton::Life;
-    antCount_->Enable(!life);
-    resetAnts_->Enable(!life);
-    wrap_->Enable(life);  // the ant always wraps, whatever the topology says
-    ruleBox_->Enable(life);
+    m_antCount->Enable(!life);
+    m_resetAnts->Enable(!life);
+    m_wrap->Enable(life);  // the ant always wraps, whatever the topology says
+    m_ruleBox->Enable(life);
 }
 
 core::Automaton ControlPanel::selectedAutomaton() const
 {
-    const int selection = automaton_->GetSelection();
+    const int selection = m_automaton->GetSelection();
     if (selection < 0 || static_cast<std::size_t>(selection) >= core::kAutomata.size())
     {
         return core::Automaton::Life;
@@ -140,53 +139,53 @@ core::Automaton ControlPanel::selectedAutomaton() const
 
 void ControlPanel::setAntCount(int count)
 {
-    antCount_->SetValue(count);
+    m_antCount->SetValue(count);
 }
 
 int ControlPanel::antCount() const
 {
-    return antCount_->GetValue();
+    return m_antCount->GetValue();
 }
 
 void ControlPanel::setSpeed(core::Speed speed)
 {
-    speedSpin_->SetValue(speed.gensPerSecond);
+    m_speedSpin->SetValue(speed.gensPerSecond);
     // Several slider positions share one rate; leave the slider where the user put it if it
     // already fits.
-    if (core::Speed::fromSliderPosition(speedSlider_->GetValue()) != speed.gensPerSecond)
+    if (core::Speed::fromSliderPosition(m_speedSlider->GetValue()) != speed.gensPerSecond)
     {
-        speedSlider_->SetValue(core::Speed::toSliderPosition(speed.gensPerSecond));
+        m_speedSlider->SetValue(core::Speed::toSliderPosition(speed.gensPerSecond));
     }
-    maxSpeed_->SetValue(speed.unlimited);
+    m_maxSpeed->SetValue(speed.unlimited);
     // At Max the rate is ignored; greying it out says so.
-    speedSlider_->Enable(!speed.unlimited);
-    speedSpin_->Enable(!speed.unlimited);
+    m_speedSlider->Enable(!speed.unlimited);
+    m_speedSpin->Enable(!speed.unlimited);
 }
 
 core::Speed ControlPanel::speed() const
 {
-    return {.gensPerSecond = speedSpin_->GetValue(), .unlimited = maxSpeed_->GetValue()};
+    return {.gensPerSecond = m_speedSpin->GetValue(), .unlimited = m_maxSpeed->GetValue()};
 }
 
 void ControlPanel::setCellSize(int px)
 {
-    cellSizeSpin_->SetValue(px);
-    cellSizeSlider_->SetValue(static_cast<int>(render::nearestZoomStep(px)));
+    m_cellSizeSpin->SetValue(px);
+    m_cellSizeSlider->SetValue(static_cast<int>(render::nearestZoomStep(px)));
 }
 
 int ControlPanel::cellSize() const
 {
-    return cellSizeSpin_->GetValue();
+    return m_cellSizeSpin->GetValue();
 }
 
 void ControlPanel::setShowGrid(bool show)
 {
-    showGrid_->SetValue(show);
+    m_showGrid->SetValue(show);
 }
 
 void ControlPanel::setWrap(bool wrap)
 {
-    wrap_->SetValue(wrap);
+    m_wrap->SetValue(wrap);
 }
 
 void ControlPanel::setWorldInfo(core::Extent extent, std::uint64_t bytes)
@@ -194,31 +193,31 @@ void ControlPanel::setWorldInfo(core::Extent extent, std::uint64_t bytes)
     const wxString text = toWx(std::format(
         "{} × {} cells\n{}", core::formatCount(static_cast<std::uint64_t>(extent.width)),
         core::formatCount(static_cast<std::uint64_t>(extent.height)), core::formatBytes(bytes)));
-    if (text == worldInfo_->GetLabelText())
+    if (text == m_worldInfo->GetLabelText())
     {
         return;
     }
-    worldInfo_->SetLabelText(text);
+    m_worldInfo->SetLabelText(text);
     Layout();  // the text may need a different width
 }
 
 void ControlPanel::setRule(const core::Rule& rule)
 {
-    ruleText_->ChangeValue(toWx(rule.toString()));  // unlike SetValue, sends no wxEVT_TEXT
+    m_ruleText->ChangeValue(toWx(rule.toString()));  // unlike SetValue, sends no wxEVT_TEXT
     // A rule without a preset selects "Custom", the entry after the presets.
     const std::optional<std::size_t> preset = core::findPreset(rule);
-    rulePreset_->SetSelection(static_cast<int>(preset.value_or(core::kRulePresets.size())));
+    m_rulePreset->SetSelection(static_cast<int>(preset.value_or(core::kRulePresets.size())));
     setRuleError({});
 }
 
 std::string ControlPanel::ruleText() const
 {
-    return toUtf8(ruleText_->GetValue());
+    return toUtf8(m_ruleText->GetValue());
 }
 
 std::optional<std::size_t> ControlPanel::selectedPreset() const
 {
-    const int selection = rulePreset_->GetSelection();
+    const int selection = m_rulePreset->GetSelection();
     if (selection < 0 || static_cast<std::size_t>(selection) >= core::kRulePresets.size())
     {
         return std::nullopt;
@@ -228,27 +227,27 @@ std::optional<std::size_t> ControlPanel::selectedPreset() const
 
 void ControlPanel::setRuleError(std::string_view message)
 {
-    if (message.empty() && !ruleError_->IsShown())
+    if (message.empty() && !m_ruleError->IsShown())
     {
         return;
     }
     // SetLabelText: an '&' is shown, not taken as a mnemonic.
-    ruleError_->SetLabelText(toWx(message));
-    ruleError_->Wrap(rulePreset_->GetSize().GetWidth());  // the choice spans the whole group
-    ruleError_->Show(!message.empty());
+    m_ruleError->SetLabelText(toWx(message));
+    m_ruleError->Wrap(m_rulePreset->GetSize().GetWidth());  // the choice spans the whole group
+    m_ruleError->Show(!message.empty());
     FitInside();  // the scrollable height changed
     Layout();
 }
 
 void ControlPanel::focusRuleText()
 {
-    ruleText_->SetFocus();
-    ruleText_->SelectAll();
+    m_ruleText->SetFocus();
+    m_ruleText->SelectAll();
 }
 
 double ControlPanel::randomDensity() const
 {
-    return density_->GetValue() / 100.0;
+    return m_density->GetValue() / 100.0;
 }
 
 void ControlPanel::addSimulationGroup(wxSizer& column)
@@ -262,37 +261,37 @@ void ControlPanel::addSimulationGroup(wxSizer& column)
     {
         automatonNames.Add(toWx(core::toString(automaton)));
     }
-    automaton_ = new wxChoice(box, wxID_ANY, wxDefaultPosition, wxDefaultSize, automatonNames);
-    automaton_->SetSelection(0);
-    automaton_->SetToolTip("Which automaton the world runs");
+    m_automaton = new wxChoice(box, wxID_ANY, wxDefaultPosition, wxDefaultSize, automatonNames);
+    m_automaton->SetSelection(0);
+    m_automaton->SetToolTip("Which automaton the world runs");
 
-    runPause_       = new wxButton(box, wxID_ANY, "Run");
+    m_runPause      = new wxButton(box, wxID_ANY, "Run");
     auto* step      = new wxButton(box, wxID_ANY, "Step");
     auto* clear     = new wxButton(box, wxID_ANY, "Clear");
     auto* randomize = new wxButton(box, wxID_ANY, "Randomize");
-    // Created before antCount_, so the density stays the group's first wxSpinCtrl.
-    density_ =
+    // Created before m_antCount, so the density stays the group's first wxSpinCtrl.
+    m_density =
         makeSpin(box, kMinDensityPercent, kMaxDensityPercent, defaults::kRandomDensityPercent);
-    density_->SetToolTip("Share of live cells after Randomize");
-    antCount_ = makeSpin(box, 1, core::kMaxAnts, defaults::kAntCount);
-    antCount_->SetToolTip("Ants on the world; each one moves once per generation");
-    resetAnts_ = new wxButton(box, wxID_ANY, "Reset");
+    m_density->SetToolTip("Share of live cells after Randomize");
+    m_antCount = makeSpin(box, 1, core::kMaxAnts, defaults::kAntCount);
+    m_antCount->SetToolTip("Ants on the world; each one moves once per generation");
+    m_resetAnts = new wxButton(box, wxID_ANY, "Reset");
 
-    sendOn(*automaton_, wxEVT_CHOICE, ID_AUTOMATON_CHANGED);
-    sendOn(*runPause_, wxEVT_BUTTON, ID_RUN_PAUSE);
-    sendOn(*step, wxEVT_BUTTON, ID_STEP);
-    sendOn(*clear, wxEVT_BUTTON, ID_CLEAR);
-    sendOn(*randomize, wxEVT_BUTTON, ID_RANDOMIZE);
+    sendOn(*m_automaton, wxEVT_CHOICE, AutomatonChangedID);
+    sendOn(*m_runPause, wxEVT_BUTTON, RunPauseID);
+    sendOn(*step, wxEVT_BUTTON, StepID);
+    sendOn(*clear, wxEVT_BUTTON, ClearID);
+    sendOn(*randomize, wxEVT_BUTTON, RandomizeID);
     // The density sends nothing: the Randomize handler reads it. Changing the count is a reset.
-    sendOn(*antCount_, wxEVT_SPINCTRL, ID_RESET_ANTS);
-    sendOn(*resetAnts_, wxEVT_BUTTON, ID_RESET_ANTS);
+    sendOn(*m_antCount, wxEVT_SPINCTRL, ResetAntsID);
+    sendOn(*m_resetAnts, wxEVT_BUTTON, ResetAntsID);
 
-    group->Add(automaton_, rowFlags());
-    group->Add(buttonGrid({runPause_, step, clear, randomize}), rowFlags());
+    group->Add(m_automaton, rowFlags());
+    group->Add(buttonGrid({m_runPause, step, clear, randomize}), rowFlags());
     group->Add(stretchRow(new wxStaticText(box, wxID_ANY, "Density"),
-                          {density_, new wxStaticText(box, wxID_ANY, "%")}),
+                          {m_density, new wxStaticText(box, wxID_ANY, "%")}),
                rowFlags());
-    group->Add(stretchRow(new wxStaticText(box, wxID_ANY, "Ants"), {antCount_, resetAnts_}),
+    group->Add(stretchRow(new wxStaticText(box, wxID_ANY, "Ants"), {m_antCount, m_resetAnts}),
                rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border());
 }
@@ -302,24 +301,24 @@ void ControlPanel::addSpeedGroup(wxSizer& column)
     auto*        group = new wxStaticBoxSizer(wxVERTICAL, this, "Speed");
     wxStaticBox* box   = group->GetStaticBox();
 
-    speedSlider_ = new wxSlider(box, wxID_ANY, 0, 0, core::Speed::kSliderMax);
-    speedSpin_   = makeSpin(box, core::Speed::kMin, core::Speed::kMax, core::Speed::kMin);
-    maxSpeed_    = new wxCheckBox(box, wxID_ANY, "Max speed");
-    speedSlider_->SetToolTip("Generations per second (logarithmic)");
+    m_speedSlider = new wxSlider(box, wxID_ANY, 0, 0, core::Speed::kSliderMax);
+    m_speedSpin   = makeSpin(box, core::Speed::kMin, core::Speed::kMax, core::Speed::kMin);
+    m_maxSpeed    = new wxCheckBox(box, wxID_ANY, "Max speed");
+    m_speedSlider->SetToolTip("Generations per second (logarithmic)");
 
     // The slider and the spin control show the same value; each updates the other before sending.
-    speedSlider_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-        speedSpin_->SetValue(core::Speed::fromSliderPosition(speedSlider_->GetValue()));
-        emitCommand(*speedSlider_, ID_SPEED_CHANGED);
+    m_speedSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
+        m_speedSpin->SetValue(core::Speed::fromSliderPosition(m_speedSlider->GetValue()));
+        emitCommand(*m_speedSlider, SpeedChangedID);
     });
-    speedSpin_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
-        speedSlider_->SetValue(core::Speed::toSliderPosition(speedSpin_->GetValue()));
-        emitCommand(*speedSpin_, ID_SPEED_CHANGED);
+    m_speedSpin->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
+        m_speedSlider->SetValue(core::Speed::toSliderPosition(m_speedSpin->GetValue()));
+        emitCommand(*m_speedSpin, SpeedChangedID);
     });
-    sendOn(*maxSpeed_, wxEVT_CHECKBOX, ID_TOGGLE_MAX_SPEED);
+    sendOn(*m_maxSpeed, wxEVT_CHECKBOX, ToggleMaxSpeedID);
 
-    group->Add(stretchRow(speedSlider_, {speedSpin_}), rowFlags());
-    group->Add(maxSpeed_, rowFlags());
+    group->Add(stretchRow(m_speedSlider, {m_speedSpin}), rowFlags());
+    group->Add(m_maxSpeed, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 }
 
@@ -330,32 +329,33 @@ void ControlPanel::addViewGroup(wxSizer& column)
 
     const auto lastZoomStep = static_cast<int>(render::kZoomSteps.size() - 1);
 
-    cellSizeSlider_ = new wxSlider(box, wxID_ANY, 0, 0, lastZoomStep);
-    cellSizeSpin_ = makeSpin(box, render::kMinCellSize, render::kMaxCellSize, defaults::kCellSize);
-    auto* fit     = new wxButton(box, wxID_ANY, "Fit");
-    auto* center  = new wxButton(box, wxID_ANY, "Center");
-    showGrid_     = new wxCheckBox(box, wxID_ANY, "Grid lines");
-    cellSizeSlider_->SetToolTip("Cell size in screen pixels");
+    m_cellSizeSlider = new wxSlider(box, wxID_ANY, 0, 0, lastZoomStep);
+    m_cellSizeSpin = makeSpin(box, render::kMinCellSize, render::kMaxCellSize, defaults::kCellSize);
+    auto* fit      = new wxButton(box, wxID_ANY, "Fit");
+    auto* center   = new wxButton(box, wxID_ANY, "Center");
+    m_showGrid     = new wxCheckBox(box, wxID_ANY, "Grid lines");
+    m_cellSizeSlider->SetToolTip("Cell size in screen pixels");
 
     // The slider moves along render::kZoomSteps; the spin control takes any size in between.
-    cellSizeSlider_->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-        cellSizeSpin_->SetValue(
-            render::kZoomSteps.at(static_cast<std::size_t>(cellSizeSlider_->GetValue())));
-        emitCommand(*cellSizeSlider_, ID_CELL_SIZE_CHANGED);
+    m_cellSizeSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
+        m_cellSizeSpin->SetValue(
+            render::kZoomSteps.at(static_cast<std::size_t>(m_cellSizeSlider->GetValue())));
+        emitCommand(*m_cellSizeSlider, CellSizeChangedID);
     });
-    cellSizeSpin_->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
-        cellSizeSlider_->SetValue(
-            static_cast<int>(render::nearestZoomStep(cellSizeSpin_->GetValue())));
-        emitCommand(*cellSizeSpin_, ID_CELL_SIZE_CHANGED);
+    m_cellSizeSpin->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
+        m_cellSizeSlider->SetValue(
+            static_cast<int>(render::nearestZoomStep(m_cellSizeSpin->GetValue())));
+        emitCommand(*m_cellSizeSpin, CellSizeChangedID);
     });
-    sendOn(*fit, wxEVT_BUTTON, ID_ZOOM_FIT);
-    sendOn(*center, wxEVT_BUTTON, ID_CENTER_VIEW);
-    sendOn(*showGrid_, wxEVT_CHECKBOX, ID_TOGGLE_GRID);
+    sendOn(*fit, wxEVT_BUTTON, ZoomFitID);
+    sendOn(*center, wxEVT_BUTTON, CenterViewID);
+    sendOn(*m_showGrid, wxEVT_CHECKBOX, ToggleGridID);
 
-    group->Add(stretchRow(cellSizeSlider_, {cellSizeSpin_, new wxStaticText(box, wxID_ANY, "px")}),
-               rowFlags());
+    group->Add(
+        stretchRow(m_cellSizeSlider, {m_cellSizeSpin, new wxStaticText(box, wxID_ANY, "px")}),
+        rowFlags());
     group->Add(buttonGrid({fit, center}), rowFlags());
-    group->Add(showGrid_, rowFlags());
+    group->Add(m_showGrid, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 }
 
@@ -364,17 +364,17 @@ void ControlPanel::addWorldGroup(wxSizer& column)
     auto*        group = new wxStaticBoxSizer(wxVERTICAL, this, "World");
     wxStaticBox* box   = group->GetStaticBox();
 
-    worldInfo_   = new wxStaticText(box, wxID_ANY, wxString());
+    m_worldInfo  = new wxStaticText(box, wxID_ANY, wxString());
     auto* resize = new wxButton(box, wxID_ANY, toWx("Resize…"));
-    wrap_        = new wxCheckBox(box, wxID_ANY, "Wrap edges");
-    wrap_->SetToolTip("Opposite edges are neighbours (a torus)");
+    m_wrap       = new wxCheckBox(box, wxID_ANY, "Wrap edges");
+    m_wrap->SetToolTip("Opposite edges are neighbours (a torus)");
 
-    sendOn(*resize, wxEVT_BUTTON, ID_WORLD_SIZE);
-    sendOn(*wrap_, wxEVT_CHECKBOX, ID_TOGGLE_WRAP);
+    sendOn(*resize, wxEVT_BUTTON, WorldSizeID);
+    sendOn(*m_wrap, wxEVT_CHECKBOX, ToggleWrapID);
 
-    group->Add(worldInfo_, rowFlags());
+    group->Add(m_worldInfo, rowFlags());
     group->Add(buttonGrid({resize}), rowFlags());
-    group->Add(wrap_, rowFlags());
+    group->Add(m_wrap, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 }
 
@@ -383,7 +383,7 @@ void ControlPanel::addRuleGroup(wxSizer& column)
     auto*        group = new wxStaticBoxSizer(wxVERTICAL, this, "Rule");
     wxStaticBox* box   = group->GetStaticBox();
 
-    ruleBox_ = box;  // Life-only: setAutomaton() greys out the whole group through it
+    m_ruleBox = box;  // Life-only: setAutomaton() greys out the whole group through it
 
     wxArrayString presetNames;
     for (const core::NamedRule& preset : core::kRulePresets)
@@ -391,24 +391,24 @@ void ControlPanel::addRuleGroup(wxSizer& column)
         presetNames.Add(toWx(preset.name));
     }
     presetNames.Add("Custom");  // index kRulePresets.size()
-    rulePreset_ = new wxChoice(box, wxID_ANY, wxDefaultPosition, wxDefaultSize, presetNames);
-    ruleText_   = new wxTextCtrl(box, wxID_ANY, wxString(), wxDefaultPosition, wxDefaultSize,
-                                 wxTE_PROCESS_ENTER);
-    auto* apply = new wxButton(box, wxID_ANY, "Apply");
-    ruleError_  = new wxStaticText(box, wxID_ANY, wxString());
-    ruleText_->SetToolTip(
+    m_rulePreset = new wxChoice(box, wxID_ANY, wxDefaultPosition, wxDefaultSize, presetNames);
+    m_ruleText   = new wxTextCtrl(box, wxID_ANY, wxString(), wxDefaultPosition, wxDefaultSize,
+                                  wxTE_PROCESS_ENTER);
+    auto* apply  = new wxButton(box, wxID_ANY, "Apply");
+    m_ruleError  = new wxStaticText(box, wxID_ANY, wxString());
+    m_ruleText->SetToolTip(
         "B/S notation: B = neighbour counts that give birth, S = counts that survive");
 
-    useErrorColour(*ruleError_);
-    ruleError_->Hide();
+    useErrorColour(*m_ruleError);
+    m_ruleError->Hide();
 
-    sendOn(*rulePreset_, wxEVT_CHOICE, ID_RULE_PRESET);
-    sendOn(*ruleText_, wxEVT_TEXT_ENTER, ID_APPLY_RULE);
-    sendOn(*apply, wxEVT_BUTTON, ID_APPLY_RULE);
+    sendOn(*m_rulePreset, wxEVT_CHOICE, RulePresetID);
+    sendOn(*m_ruleText, wxEVT_TEXT_ENTER, ApplyRuleID);
+    sendOn(*apply, wxEVT_BUTTON, ApplyRuleID);
 
-    group->Add(rulePreset_, rowFlags());
-    group->Add(stretchRow(ruleText_, {apply}), rowFlags());
-    group->Add(ruleError_, rowFlags());
+    group->Add(m_rulePreset, rowFlags());
+    group->Add(stretchRow(m_ruleText, {apply}), rowFlags());
+    group->Add(m_ruleError, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 }
 

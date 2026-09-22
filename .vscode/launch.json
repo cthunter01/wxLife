@@ -3,16 +3,27 @@
   "configurations": [
     {
       // Debugs the CMake Tools launch target (status bar). Pick wxLife_tests there to debug the tests.
-      "name": "Debug launch target (gdb)",
+      // Linux: gdb. macOS: lldb.
+      "name": "Debug launch target (gdb/lldb)",
       "type": "cppdbg",
       "request": "launch",
       "program": "${command:cmake.launchTargetPath}",
       "args": [],
       "cwd": "${workspaceFolder}",
       "MIMode": "gdb",
+      "osx": { "MIMode": "lldb" },
       "setupCommands": [
         { "description": "Pretty-print STL containers", "text": "-enable-pretty-printing", "ignoreFailures": true }
       ]
+    },
+    {
+      // Windows (MSVC builds): the same, with the Visual Studio debugger.
+      "name": "Debug launch target (Visual Studio debugger)",
+      "type": "cppvsdbg",
+      "request": "launch",
+      "program": "${command:cmake.launchTargetPath}",
+      "args": [],
+      "cwd": "${workspaceFolder}"
     }
   ]
 }

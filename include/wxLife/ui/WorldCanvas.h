@@ -85,7 +85,7 @@ private:
     void continuePaint(render::PixelPoint devicePoint);
     void endDrag();
     void setHovered(std::optional<core::CellPos> cell);
-    /// Scrollbars, hovered cell, Refresh(false), callbacks_.viewChanged.
+    /// Scrollbars, hovered cell, Refresh(false), m_callbacks.viewChanged.
     void viewportChanged();
     /// viewportChanged() after a zoom or scroll by the user; ends a kept fit.
     void cameraMoved();
@@ -97,29 +97,29 @@ private:
     [[nodiscard]] render::PixelPoint toDevice(wxPoint logical) const;
     [[nodiscard]] render::PixelPoint canvasCentre() const noexcept;
 
-    const core::World&  world_;
-    Callbacks           callbacks_;
-    render::Viewport    viewport_;
-    render::RenderStyle style_;
-    render::Rasterizer  rasterizer_;
-    render::PixelBuffer frame_;
+    const core::World&  m_world;
+    Callbacks           m_callbacks;
+    render::Viewport    m_viewport;
+    render::RenderStyle m_style;
+    render::Rasterizer  m_rasterizer;
+    render::PixelBuffer m_frame;
 
-    Drag       drag_        = Drag::None;
-    int        dragButton_  = wxMOUSE_BTN_NONE;  ///< Only this button's release ends the drag.
-    core::Cell strokeValue_ = core::kAlive;
+    Drag       m_drag        = Drag::None;
+    int        m_dragButton  = wxMOUSE_BTN_NONE;  ///< Only this button's release ends the drag.
+    core::Cell m_strokeValue = core::kAlive;
     /// nullopt: the next motion starts a new segment.
-    std::optional<core::CellPos> lastStrokeCell_;
+    std::optional<core::CellPos> m_lastStrokeCell;
     /// Reused buffer for one stroke segment.
-    std::vector<core::CellPos> strokeCells_;
-    render::PixelPoint         lastPanPoint_;
+    std::vector<core::CellPos> m_strokeCells;
+    render::PixelPoint         m_lastPanPoint;
     /// Device pixels; nullopt while the pointer is elsewhere.
-    std::optional<render::PixelPoint> pointer_;
-    std::optional<core::CellPos>      hovered_;
+    std::optional<render::PixelPoint> m_pointer;
+    std::optional<core::CellPos>      m_hovered;
 
-    bool   keepFitted_       = false;  ///< Set by fitWorld(), cleared by cameraMoved().
-    double wheelZoomNotches_ = 0.0;    ///< Leftover fractions from smooth-scrolling devices.
-    double wheelPanX_        = 0.0;
-    double wheelPanY_        = 0.0;
+    bool   m_keepFitted       = false;  ///< Set by fitWorld(), cleared by cameraMoved().
+    double m_wheelZoomNotches = 0.0;    ///< Leftover fractions from smooth-scrolling devices.
+    double m_wheelPanX        = 0.0;
+    double m_wheelPanY        = 0.0;
 };
 
 }  // namespace wxLife::ui

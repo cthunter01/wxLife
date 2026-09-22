@@ -1,10 +1,11 @@
+#include "wxLife/core/Ant.h"
+
 #include <algorithm>
 #include <array>
 
 #include <gtest/gtest.h>
 
 #include "support/AsciiGrid.h"
-#include "wxLife/core/Ant.h"
 #include "wxLife/core/Grid.h"
 #include "wxLife/core/Types.h"
 

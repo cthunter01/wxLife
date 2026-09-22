@@ -6,3 +6,6 @@ CheckOptions:
   # The check does not see that ASSERT_TRUE(cell) returns when `cell` is empty, so the tests read optionals
   # with value(), which throws instead of reading an empty optional.
   bugprone-unchecked-optional-access.IgnoreValueCalls: true
+  # PrintTo() is the name GoogleTest looks up to print a value of our types.
+  readability-identifier-naming.FunctionIgnoredRegexp: '^PrintTo$'
+  readability-identifier-naming.GlobalFunctionIgnoredRegexp: '^PrintTo$'

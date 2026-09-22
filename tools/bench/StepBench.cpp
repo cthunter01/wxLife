@@ -7,6 +7,8 @@
 #include <cctype>
 #include <charconv>
 #include <chrono>
+#include <concepts>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -18,6 +20,7 @@
 #include <print>
 #include <ratio>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -77,19 +80,37 @@ void printUsage(std::FILE* stream)
     std::print(stream, kUsage, engines, formatCount(static_cast<std::uint64_t>(kMinCellsPerBand)));
 }
 
-// Parses all of `text` as a number, or nothing.
+// Parses all of `text` as a number, or nothing. Floating point goes through std::stod(), because
+// libc++ has no floating-point from_chars before LLVM 20, and Apple's then needs macOS 26. The
+// bench never calls setlocale(), so stod() reads '.' as the decimal point.
 template <typename Number>
 std::optional<Number> parseNumber(std::string_view text)
 {
-    const char* const first = std::to_address(text.begin());
-    const char* const last  = std::to_address(text.end());
-    Number            value{};
-    const auto [end, error] = std::from_chars(first, last, value);
-    if (error != std::errc{} || end != last)
+    if constexpr (std::same_as<Number, double>)
     {
-        return std::nullopt;
+        try
+        {
+            std::size_t  used  = 0;
+            const double value = std::stod(std::string(text), &used);
+            return used == text.size() ? std::optional<double>(value) : std::nullopt;
+        }
+        catch (const std::logic_error&)  // std::invalid_argument, std::out_of_range
+        {
+            return std::nullopt;
+        }
     }
-    return value;
+    else
+    {
+        const char* const first = std::to_address(text.begin());
+        const char* const last  = std::to_address(text.end());
+        Number            value{};
+        const auto [end, error] = std::from_chars(first, last, value);
+        if (error != std::errc{} || end != last)
+        {
+            return std::nullopt;
+        }
+        return value;
+    }
 }
 
 std::optional<Extent> parseSize(std::string_view text)

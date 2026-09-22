@@ -49,86 +49,86 @@ void randomizeRow(std::span<Cell> cells, Coord y, std::uint64_t seed, unsigned t
 }  // namespace
 
 World::World(Extent extent, Rule rule, Topology topology)
-  : current_(extent),
-    next_(extent),
-    rule_(rule),
-    topology_(topology),
-    stepper_(std::make_unique<BandedStepper>())
+  : m_current(extent),
+    m_next(extent),
+    m_rule(rule),
+    m_topology(topology),
+    m_stepper(std::make_unique<BandedStepper>())
 {
     // Room for every ant up front, so adding one later never reallocates and toggleAntAt() can be
     // noexcept.
-    ants_.reserve(static_cast<std::size_t>(kMaxAnts));
+    m_ants.reserve(static_cast<std::size_t>(kMaxAnts));
 }
 
 Extent World::extent() const noexcept
 {
-    return current_.extent();
+    return m_current.extent();
 }
 
 const Grid& World::cells() const noexcept
 {
-    return current_;
+    return m_current;
 }
 
 Cell World::at(CellPos p) const noexcept
 {
-    return current_.at(p);
+    return m_current.at(p);
 }
 
 const Rule& World::rule() const noexcept
 {
-    return rule_;
+    return m_rule;
 }
 
 Topology World::topology() const noexcept
 {
-    return topology_;
+    return m_topology;
 }
 
 Automaton World::automaton() const noexcept
 {
-    return automaton_;
+    return m_automaton;
 }
 
 std::span<const Ant> World::ants() const noexcept
 {
-    return ants_;
+    return m_ants;
 }
 
 const Stepper& World::stepper() const noexcept
 {
-    return *stepper_;
+    return *m_stepper;
 }
 
 std::uint64_t World::generation() const noexcept
 {
-    return generation_;
+    return m_generation;
 }
 
 CellCount World::population() const noexcept
 {
-    return population_;
+    return m_population;
 }
 
 void World::step()
 {
-    switch (automaton_)
+    switch (m_automaton)
     {
         case Automaton::Life:
-            current_.updateBorder(topology_);
-            population_ = stepper_->step(current_, next_, rule_, topology_);
-            std::swap(current_, next_);  // swaps the buffers, so no grid is allocated per step
+            m_current.updateBorder(m_topology);
+            m_population = m_stepper->step(m_current, m_next, m_rule, m_topology);
+            std::swap(m_current, m_next);  // swaps the buffers, so no grid is allocated per step
             break;
         case Automaton::LangtonAnt:
             // One move each, in index order over the one grid, so an ant sees what the ones before
             // it left.
-            for (Ant& ant : ants_)
+            for (Ant& ant : m_ants)
             {
-                population_ += advance(ant, current_);
+                m_population += advance(ant, m_current);
             }
             break;
     }
-    ++generation_;
+    ++m_generation;
 }
 
 CellCount World::setCells(std::span<const CellPos> cells, Cell value) noexcept
@@ -137,13 +137,13 @@ CellCount World::setCells(std::span<const CellPos> cells, Cell value) noexcept
     CellCount changed = 0;
     for (const CellPos p : cells)
     {
-        if (extent().contains(p) && current_.at(p) != value)
+        if (extent().contains(p) && m_current.at(p) != value)
         {
-            current_.set(p, value);
+            m_current.set(p, value);
             ++changed;
         }
     }
-    population_ += value == kAlive ? changed : -changed;
+    m_population += value == kAlive ? changed : -changed;
     return changed;
 }
 
@@ -154,10 +154,10 @@ bool World::setCell(CellPos p, Cell value) noexcept
 
 void World::clear() noexcept
 {
-    current_.clear();  // next_ is overwritten by the next step anyway
+    m_current.clear();  // m_next is overwritten by the next step anyway
     layOutAnts();      // generation 0 means the ants are back on their starting spots too
-    generation_ = 0;
-    population_ = 0;
+    m_generation = 0;
+    m_population = 0;
 }
 
 void World::randomize(double density, std::uint64_t seed)
@@ -170,12 +170,12 @@ void World::randomize(double density, std::uint64_t seed)
     forEachBand(extent().height, bands, [&](unsigned, Coord firstRow, Coord endRow) {
         for (Coord y = firstRow; y < endRow; ++y)
         {
-            randomizeRow(current_.row(y), y, seed, threshold);
+            randomizeRow(m_current.row(y), y, seed, threshold);
         }
     });
-    population_ = current_.countAlive();
+    m_population = m_current.countAlive();
     layOutAnts();
-    generation_ = 0;
+    m_generation = 0;
 }
 
 void World::resize(Extent newExtent, bool keepPattern)
@@ -200,24 +200,24 @@ void World::resize(Extent newExtent, bool keepPattern)
         const auto  index = [](Coord c) { return static_cast<std::size_t>(c); };
         for (Coord y = y0; y < y1; ++y)
         {
-            const std::span<const Cell> from = current_.row(y).subspan(index(x0), index(x1 - x0));
+            const std::span<const Cell> from = m_current.row(y).subspan(index(x0), index(x1 - x0));
             std::ranges::copy(from, current.row(y + dy).subspan(index(x0 + dx)).begin());
         }
     }
     else
     {
-        generation_ = 0;
+        m_generation = 0;
     }
 
-    current_    = std::move(current);
-    next_       = std::move(next);
-    population_ = current_.countAlive();
+    m_current    = std::move(current);
+    m_next       = std::move(next);
+    m_population = m_current.countAlive();
 
     if (keepPattern)
     {
         // The ants travel with the pattern; one the new world cropped comes back to the nearest
         // edge.
-        for (Ant& ant : ants_)
+        for (Ant& ant : m_ants)
         {
             ant.position.x = std::clamp(ant.position.x + dx, 0, newExtent.width - 1);
             ant.position.y = std::clamp(ant.position.y + dy, 0, newExtent.height - 1);
@@ -231,18 +231,18 @@ void World::resize(Extent newExtent, bool keepPattern)
 
 void World::setRule(const Rule& rule) noexcept
 {
-    rule_ = rule;
+    m_rule = rule;
 }
 
 void World::setTopology(Topology topology) noexcept
 {
-    topology_ = topology;
+    m_topology = topology;
 }
 
 void World::setAutomaton(Automaton automaton)
 {
-    automaton_ = automaton;
-    if (automaton_ == Automaton::LangtonAnt && ants_.empty())
+    m_automaton = automaton;
+    if (m_automaton == Automaton::LangtonAnt && m_ants.empty())
     {
         resetAnts(1);
     }
@@ -250,23 +250,23 @@ void World::setAutomaton(Automaton automaton)
 
 void World::setAnts(std::span<const Ant> ants)
 {
-    ants_.clear();
+    m_ants.clear();
     for (const Ant& ant : ants)
     {
-        if (ants_.size() >= static_cast<std::size_t>(kMaxAnts))
+        if (m_ants.size() >= static_cast<std::size_t>(kMaxAnts))
         {
             break;
         }
         if (extent().contains(ant.position))
         {
-            ants_.push_back(ant);
+            m_ants.push_back(ant);
         }
     }
 }
 
 void World::resetAnts(int count)
 {
-    ants_.resize(static_cast<std::size_t>(std::clamp(count, 0, kMaxAnts)));
+    m_ants.resize(static_cast<std::size_t>(std::clamp(count, 0, kMaxAnts)));
     layOutAnts();
 }
 
@@ -276,31 +276,31 @@ bool World::toggleAntAt(CellPos p) noexcept
     {
         return false;
     }
-    if (std::erase_if(ants_, [p](const Ant& ant) { return ant.position == p; }) > 0)
+    if (std::erase_if(m_ants, [p](const Ant& ant) { return ant.position == p; }) > 0)
     {
         return false;
     }
-    if (ants_.size() >= static_cast<std::size_t>(kMaxAnts))
+    if (m_ants.size() >= static_cast<std::size_t>(kMaxAnts))
     {
         return false;
     }
-    ants_.push_back({.position = p, .heading = Heading::North});  // within the reserved capacity
+    m_ants.push_back({.position = p, .heading = Heading::North});  // within the reserved capacity
     return true;
 }
 
 void World::layOutAnts() noexcept
 {
-    const auto count = static_cast<int>(ants_.size());
+    const auto count = static_cast<int>(m_ants.size());
     for (int i = 0; i < count; ++i)
     {
-        ants_[static_cast<std::size_t>(i)] = defaultAnt(i, count, extent());
+        m_ants[static_cast<std::size_t>(i)] = defaultAnt(i, count, extent());
     }
 }
 
 void World::setStepper(std::unique_ptr<Stepper> stepper) noexcept
 {
     assert(stepper != nullptr);
-    stepper_ = std::move(stepper);
+    m_stepper = std::move(stepper);
 }
 
 }  // namespace wxLife::core

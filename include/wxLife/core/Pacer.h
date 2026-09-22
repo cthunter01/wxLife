@@ -41,9 +41,9 @@ public:
     void commit(std::int64_t generationsDone) noexcept;
 
 private:
-    Speed             speed_{};
-    Clock::time_point last_;
-    double            owed_ = 0.0;  ///< Fractional generations owed.
+    Speed             m_speed{};
+    Clock::time_point m_last;
+    double            m_owed = 0.0;  ///< Fractional generations owed.
 };
 
 /// Achieved generations per second, averaged over windows of at least kWindow.
@@ -61,9 +61,9 @@ public:
     [[nodiscard]] std::optional<double> perSecond() const noexcept;
 
 private:
-    std::optional<Clock::time_point> windowStart_;  ///< End of the batch that opened the window.
-    std::int64_t                     windowGenerations_ = 0;  ///< Stepped since windowStart_.
-    std::optional<double>            rate_;
+    std::optional<Clock::time_point> m_windowStart;  ///< End of the batch that opened the window.
+    std::int64_t                     m_windowGenerations = 0;  ///< Stepped since m_windowStart.
+    std::optional<double>            m_rate;
 };
 
 }  // namespace wxLife::core

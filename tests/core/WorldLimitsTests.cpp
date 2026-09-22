@@ -1,3 +1,5 @@
+#include "wxLife/core/WorldLimits.h"
+
 #include <algorithm>
 #include <cstdint>
 #include <string>
@@ -5,7 +7,6 @@
 #include <gtest/gtest.h>
 
 #include "wxLife/core/Types.h"
-#include "wxLife/core/WorldLimits.h"
 
 namespace wxLife::core
 {

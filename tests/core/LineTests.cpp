@@ -1,3 +1,5 @@
+#include "wxLife/core/Line.h"
+
 #include <algorithm>
 #include <array>
 #include <cstddef>
@@ -9,7 +11,6 @@
 
 #include <gtest/gtest.h>
 
-#include "wxLife/core/Line.h"
 #include "wxLife/core/Random.h"
 #include "wxLife/core/Types.h"
 

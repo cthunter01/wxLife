@@ -57,12 +57,12 @@ private:
     void onTimer();
     void scheduleNext(core::Clock::duration tickCost);
 
-    core::World&          world_;
-    TickHandler           onTick_;
-    core::GenerationPacer pacer_;
-    core::RateMeter       meter_;
-    wxTimer               timer_;  ///< Default-constructed: its own owner, so Bind() works.
-    bool                  running_ = false;
+    core::World&          m_world;
+    TickHandler           m_onTick;
+    core::GenerationPacer m_pacer;
+    core::RateMeter       m_meter;
+    wxTimer               m_timer;  ///< Default-constructed: its own owner, so Bind() works.
+    bool                  m_running = false;
 };
 
 }  // namespace wxLife::ui

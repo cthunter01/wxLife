@@ -44,9 +44,9 @@ private:
     /// (y + 1) * stride + (x + 1), computed in size_t. x and y may be -1.
     [[nodiscard]] std::size_t paddedIndex(Coord x, Coord y) const noexcept;
 
-    Extent            extent_{};
-    std::size_t       stride_ = 0;  ///< width + 2
-    std::vector<Cell> cells_;       ///< (width + 2) × (height + 2), row-major
+    Extent            m_extent{};
+    std::size_t       m_stride = 0;  ///< width + 2
+    std::vector<Cell> m_cells;       ///< (width + 2) × (height + 2), row-major
 };
 
 }  // namespace wxLife::core

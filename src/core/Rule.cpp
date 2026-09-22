@@ -18,9 +18,9 @@ std::string Rule::toString() const
         }
     };
     text += 'B';
-    appendCounts(birth_);
+    appendCounts(m_birth);
     text += "/S";
-    appendCounts(survival_);
+    appendCounts(m_survival);
     return text;
 }
 

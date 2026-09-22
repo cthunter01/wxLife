@@ -1,5 +1,5 @@
 {
-  // clangd provides IntelliSense; the Microsoft C/C++ extension stays installed only for its gdb debugger.
+  // clangd provides IntelliSense; the Microsoft C/C++ extension stays installed only for its debuggers.
   "C_Cpp.intelliSenseEngine": "disabled",
   "clangd.arguments": ["--background-index", "--clang-tidy", "--completion-style=detailed"],
 

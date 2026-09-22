@@ -13,13 +13,13 @@ namespace wxLife::app
 class LifeApp final : public wxApp
 {
 public:
-    /// Sets GTK_OVERLAY_SCROLLING=0 unless it is already set, then starts wx and GTK.
+    /// With wxGTK, sets GTK_OVERLAY_SCROLLING=0 unless it is already set. Then starts wx.
     bool Initialize(int& argCount, wxChar** args) override;
     /// Creates the World and the main frame.
     bool OnInit() override;
 
 private:
-    std::unique_ptr<core::World> world_;
+    std::unique_ptr<core::World> m_world;
 };
 
 }  // namespace wxLife::app

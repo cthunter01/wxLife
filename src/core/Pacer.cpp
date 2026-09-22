@@ -16,31 +16,31 @@ namespace
 using Seconds = std::chrono::duration<double>;
 }
 
-GenerationPacer::GenerationPacer(Speed speed) noexcept : speed_(speed.clamped()) { }
+GenerationPacer::GenerationPacer(Speed speed) noexcept : m_speed(speed.clamped()) { }
 
 void GenerationPacer::setSpeed(Speed speed) noexcept
 {
-    speed_ = speed.clamped();
-    owed_  = 0.0;
+    m_speed = speed.clamped();
+    m_owed  = 0.0;
 }
 
 Speed GenerationPacer::speed() const noexcept
 {
-    return speed_;
+    return m_speed;
 }
 
 void GenerationPacer::restart(Clock::time_point now) noexcept
 {
-    last_ = now;
-    owed_ = 0.0;
+    m_last = now;
+    m_owed = 0.0;
 }
 
 TickPlan GenerationPacer::plan(Clock::time_point now) noexcept
 {
-    const double elapsed = Seconds(now - last_).count();
+    const double elapsed = Seconds(now - m_last).count();
 
-    last_ = now;
-    if (speed_.unlimited)
+    m_last = now;
+    if (m_speed.unlimited)
     {
         return {.maxGenerations = std::numeric_limits<std::int64_t>::max(),
                 .timeBudget     = kTickBudget};
@@ -48,24 +48,24 @@ TickPlan GenerationPacer::plan(Clock::time_point now) noexcept
 
     // The cap drops debt after a stall (a modal dialog, a slow step), so no burst of catch-up steps
     // follows. It also lets the rate settle at what the machine manages when ticks run out of time.
-    const double rate    = speed_.gensPerSecond;
+    const double rate    = m_speed.gensPerSecond;
     const double maxDebt = (Seconds(kMaxCatchUp).count() * rate) + 1.0;
-    owed_                = std::clamp(owed_ + (elapsed * rate), 0.0, maxDebt);
+    m_owed               = std::clamp(m_owed + (elapsed * rate), 0.0, maxDebt);
     // Whole generations only; the fraction stays owed.
-    return {.maxGenerations = static_cast<std::int64_t>(owed_), .timeBudget = kTickBudget};
+    return {.maxGenerations = static_cast<std::int64_t>(m_owed), .timeBudget = kTickBudget};
 }
 
 void GenerationPacer::commit(std::int64_t generationsDone) noexcept
 {
     // Unlimited ticks report more than was owed; the debt never goes negative.
-    owed_ = std::max(0.0, owed_ - static_cast<double>(generationsDone));
+    m_owed = std::max(0.0, m_owed - static_cast<double>(generationsDone));
 }
 
 void RateMeter::reset() noexcept
 {
-    windowStart_.reset();
-    windowGenerations_ = 0;
-    rate_.reset();
+    m_windowStart.reset();
+    m_windowGenerations = 0;
+    m_rate.reset();
 }
 
 void RateMeter::record(std::int64_t generations, Clock::time_point now) noexcept
@@ -76,26 +76,26 @@ void RateMeter::record(std::int64_t generations, Clock::time_point now) noexcept
     {
         return;
     }
-    if (!windowStart_)
+    if (!m_windowStart)
     {
         // The first batch's steps started at an unknown time, so they are not counted.
-        windowStart_ = now;
+        m_windowStart = now;
         return;
     }
-    windowGenerations_ += generations;
-    const Clock::duration elapsed = now - *windowStart_;
+    m_windowGenerations += generations;
+    const Clock::duration elapsed = now - *m_windowStart;
     if (elapsed < kWindow)
     {
         return;
     }
-    rate_              = static_cast<double>(windowGenerations_) / Seconds(elapsed).count();
-    windowStart_       = now;
-    windowGenerations_ = 0;
+    m_rate              = static_cast<double>(m_windowGenerations) / Seconds(elapsed).count();
+    m_windowStart       = now;
+    m_windowGenerations = 0;
 }
 
 std::optional<double> RateMeter::perSecond() const noexcept
 {
-    return rate_;
+    return m_rate;
 }
 
 }  // namespace wxLife::core

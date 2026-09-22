@@ -56,8 +56,8 @@ public:
     constexpr Rule() noexcept = default;  ///< Conway's Life, B3/S23.
     /// Bits above 8 are dropped.
     constexpr Rule(Mask birth, Mask survival) noexcept
-      : birth_(static_cast<Mask>(birth & kAllCounts)),
-        survival_(static_cast<Mask>(survival & kAllCounts))
+      : m_birth(static_cast<Mask>(birth & kAllCounts)),
+        m_survival(static_cast<Mask>(survival & kAllCounts))
     {
     }
 
@@ -71,22 +71,22 @@ public:
     /// @pre liveNeighbours <= 8
     [[nodiscard]] constexpr Cell nextState(bool alive, unsigned liveNeighbours) const noexcept
     {
-        return static_cast<Cell>((unsigned{alive ? survival_ : birth_} >> liveNeighbours) & 1U);
+        return static_cast<Cell>((unsigned{alive ? m_survival : m_birth} >> liveNeighbours) & 1U);
     }
     [[nodiscard]] constexpr KernelMasks kernelMasks() const noexcept
     {
-        return {.dead = birth_, .alive = static_cast<std::uint32_t>(survival_) << 1};
+        return {.dead = m_birth, .alive = static_cast<std::uint32_t>(m_survival) << 1};
     }
-    [[nodiscard]] constexpr Mask birthMask() const noexcept { return birth_; }
-    [[nodiscard]] constexpr Mask survivalMask() const noexcept { return survival_; }
+    [[nodiscard]] constexpr Mask birthMask() const noexcept { return m_birth; }
+    [[nodiscard]] constexpr Mask survivalMask() const noexcept { return m_survival; }
 
     friend constexpr bool operator==(const Rule&, const Rule&) noexcept = default;
 
 private:
     static constexpr Mask kAllCounts = 0x1FF;
 
-    Mask birth_    = 1U << 3;
-    Mask survival_ = (1U << 2) | (1U << 3);
+    Mask m_birth    = 1U << 3;
+    Mask m_survival = (1U << 2) | (1U << 3);
 };
 
 // Defined outside the class: std::expected<Rule, ...> needs the complete Rule. One pass over the
@@ -186,12 +186,16 @@ inline constexpr std::array kRulePresets{
 /// Index into kRulePresets of the preset equal to `rule`, if there is one.
 [[nodiscard]] constexpr std::optional<std::size_t> findPreset(const Rule& rule) noexcept
 {
-    const auto* const found = std::ranges::find(kRulePresets, rule, &NamedRule::rule);
-    if (found == kRulePresets.end())
+    // Indices, not iterators: std::array's iterator is a pointer in libstdc++ and libc++ but a
+    // class in MSVC's library, so no one spelling of an iterator variable suits every platform's
+    // checks.
+    const auto index = static_cast<std::size_t>(std::ranges::distance(
+        kRulePresets.begin(), std::ranges::find(kRulePresets, rule, &NamedRule::rule)));
+    if (index == kRulePresets.size())
     {
         return std::nullopt;
     }
-    return static_cast<std::size_t>(std::ranges::distance(kRulePresets.begin(), found));
+    return index;
 }
 
 }  // namespace wxLife::core

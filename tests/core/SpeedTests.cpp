@@ -1,10 +1,10 @@
+#include "wxLife/core/Speed.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdlib>
 
 #include <gtest/gtest.h>
-
-#include "wxLife/core/Speed.h"
 
 namespace wxLife::core
 {

@@ -1,3 +1,5 @@
+#include "wxLife/render/Viewport.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -16,7 +18,6 @@
 #include "wxLife/core/Types.h"
 #include "wxLife/core/WorldLimits.h"
 #include "wxLife/render/Types.h"
-#include "wxLife/render/Viewport.h"
 
 namespace wxLife::render
 {

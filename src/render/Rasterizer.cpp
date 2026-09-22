@@ -205,15 +205,15 @@ void Rasterizer::render(const core::Grid& grid, const Viewport& viewport, const 
                style.outside);
 
     // Everything a cell row is copied from, built once per frame.
-    buildStamp(deadStamp_, layout, style.dead, style.gridLine);
-    buildStamp(aliveStamp_, layout, style.alive, style.gridLine);
-    buildStamp(deadStampMajor_, layout, style.dead, style.gridLineMajor);
-    buildStamp(aliveStampMajor_, layout, style.alive, style.gridLineMajor);
-    const Stamps stamps{{{deadStamp_, aliveStamp_}, {deadStampMajor_, aliveStampMajor_}}};
+    buildStamp(m_deadStamp, layout, style.dead, style.gridLine);
+    buildStamp(m_aliveStamp, layout, style.alive, style.gridLine);
+    buildStamp(m_deadStampMajor, layout, style.dead, style.gridLineMajor);
+    buildStamp(m_aliveStampMajor, layout, style.alive, style.gridLineMajor);
+    const Stamps stamps{{{m_deadStamp, m_aliveStamp}, {m_deadStampMajor, m_aliveStampMajor}}};
     if (layout.gridLines)
     {
-        buildGridRow(gridRow_, layout, style.gridLine, style.gridLineMajor, style.outside);
-        buildGridRow(gridRowMajor_, layout, style.gridLineMajor, style.gridLineMajor,
+        buildGridRow(m_gridRow, layout, style.gridLine, style.gridLineMajor, style.outside);
+        buildGridRow(m_gridRowMajor, layout, style.gridLineMajor, style.gridLineMajor,
                      style.outside);
     }
 
@@ -239,7 +239,7 @@ void Rasterizer::render(const core::Grid& grid, const Viewport& viewport, const 
         }
         if (layout.gridLines && lineRow < layout.canvas.height)
         {
-            std::ranges::copy(layout.majorLineAfter(cy) ? gridRowMajor_ : gridRow_,
+            std::ranges::copy(layout.majorLineAfter(cy) ? m_gridRowMajor : m_gridRow,
                               out.row(lineRow).begin());
         }
     }

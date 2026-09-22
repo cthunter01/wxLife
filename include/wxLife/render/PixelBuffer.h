@@ -28,8 +28,8 @@ public:
     void              fill(Rgb color) noexcept;
 
 private:
-    PixelSize                 size_{};
-    std::vector<std::uint8_t> bytes_;
+    PixelSize                 m_size{};
+    std::vector<std::uint8_t> m_bytes;
 };
 
 }  // namespace wxLife::render

@@ -4,10 +4,12 @@ include(FetchContent)
 # SYSTEM: the dependency's headers are system headers, so our warnings and clang-tidy skip them.
 # EXCLUDE_FROM_ALL: only the parts of the dependency we link against get built.
 
-find_package(Threads REQUIRED)   # the stepping engine runs row bands on std::jthreads
+find_package(Threads REQUIRED)   # the stepping engine runs row bands on std::threads
 
 if(WXLIFE_BUILD_TESTS)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
+    # MSVC: link the same (DLL) C runtime as our targets instead of GoogleTest's static default.
+    set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     FetchContent_Declare(googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
         GIT_TAG        v1.18.0
@@ -32,6 +34,7 @@ if(WXLIFE_BUILD_UI)
         endif()
     endfunction()
 
+    # GTK 3 on Linux; elsewhere wx's own toolkit: wxMSW on Windows, wxOSX (Cocoa) on macOS.
     if(UNIX AND NOT APPLE)
         wxLife_wx_default(wxBUILD_TOOLKIT gtk3)
     endif()
@@ -45,8 +48,10 @@ if(WXLIFE_BUILD_UI)
                     WEBREQUEST SECRETSTORE LIBTIFF LIBJPEG GTKPRINT LIBMSPACK SPELLCHECK XTEST)
         wxLife_wx_default(wxUSE_${feature} OFF)
     endforeach()
-    # zlib, libpng, expat and regex (PCRE2) stay at wx's default "sys": GTK already loads the system copies,
-    # and bundled copies could clash with them (wx's bundled zlib also fails to compile with GCC 14 or newer).
+    # zlib, libpng, expat and regex (PCRE2) stay at wx's defaults. On Linux that is "sys": GTK already loads
+    # the system copies, and bundled copies could clash with them (wx's bundled zlib also fails to compile
+    # with GCC 14 or newer). On Windows wx builds its bundled copies; on macOS it takes zlib and expat from
+    # the SDK and builds the other two.
 
     FetchContent_Declare(wxWidgets
         URL      https://github.com/wxWidgets/wxWidgets/releases/download/v3.2.11/wxWidgets-3.2.11.tar.bz2

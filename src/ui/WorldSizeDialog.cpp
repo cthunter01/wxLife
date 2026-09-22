@@ -102,10 +102,10 @@ std::optional<WorldSizeRequest> WorldSizeDialog::ask(wxWindow* parent, core::Ext
 WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::Extent fitsCanvas,
                                  std::uint64_t memoryBudgetBytes)
   : wxDialog(parent, wxID_ANY, "World Size"),
-    fitsCanvas_(fitsCanvas),
-    budget_(memoryBudgetBytes),
-    width_(makeSideSpin(this, current.width)),
-    height_(makeSideSpin(this, current.height))
+    m_fitsCanvas(fitsCanvas),
+    m_budget(memoryBudgetBytes),
+    m_width(makeSideSpin(this, current.width)),
+    m_height(makeSideSpin(this, current.height))
 {
     wxArrayString presetNames;
     presetNames.Add(toWx("Choose…"));
@@ -113,25 +113,25 @@ WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::E
     {
         presetNames.Add(toWx(sizeText({.width = side, .height = side})));
     }
-    presetNames.Add(toWx(std::format("Fit window ({})", sizeText(fitsCanvas_))));
-    presets_ = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, presetNames);
-    presets_->SetSelection(kChooseIndex);
+    presetNames.Add(toWx(std::format("Fit window ({})", sizeText(m_fitsCanvas))));
+    m_presets = new wxChoice(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, presetNames);
+    m_presets->SetSelection(kChooseIndex);
 
-    keepPattern_ = new wxCheckBox(this, wxID_ANY, "Keep the current pattern (centred)");
-    keepPattern_->SetValue(true);
+    m_keepPattern = new wxCheckBox(this, wxID_ANY, "Keep the current pattern (centred)");
+    m_keepPattern->SetValue(true);
 
     // Start with the widest texts revalidate() can write, so the fitted dialog has room for them.
     const core::Extent largest{.width = core::kMaxWorldSide, .height = core::kMaxWorldSide};
-    memory_ = new wxStaticText(
-        this, wxID_ANY, toWx(memoryText(core::formatBytes(core::worldBytes(largest)), budget_)));
+    m_memory = new wxStaticText(
+        this, wxID_ANY, toWx(memoryText(core::formatBytes(core::worldBytes(largest)), m_budget)));
     const std::array<std::string, 4> errors{
         std::string(kNotWholeNumbers),
-        core::describe(core::ExtentError::TooSmall, largest, budget_),
-        core::describe(core::ExtentError::TooLarge, largest, budget_),
-        core::describe(core::ExtentError::OverMemoryBudget, largest, budget_)};
+        core::describe(core::ExtentError::TooSmall, largest, m_budget),
+        core::describe(core::ExtentError::TooLarge, largest, m_budget),
+        core::describe(core::ExtentError::OverMemoryBudget, largest, m_budget)};
     const auto textWidth = [this](const std::string& text) { return GetTextExtent(toWx(text)).x; };
-    error_ = new wxStaticText(this, wxID_ANY, toWx(std::ranges::max(errors, {}, textWidth)));
-    useErrorColour(*error_);
+    m_error = new wxStaticText(this, wxID_ANY, toWx(std::ranges::max(errors, {}, textWidth)));
+    useErrorColour(*m_error);
 
     const int  gap      = wxSizerFlags::GetDefaultBorder();
     auto*      fields   = new wxFlexGridSizer(3, gap, 2 * gap);  // label | control | unit
@@ -140,31 +140,31 @@ WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::E
         fields->Add(control, wxSizerFlags().Expand());
         fields->Add(new wxStaticText(this, wxID_ANY, unit), wxSizerFlags().CentreVertical());
     };
-    addField("Width", width_, "cells");
-    addField("Height", height_, "cells");
-    addField("Preset", presets_, wxString());
+    addField("Width", m_width, "cells");
+    addField("Height", m_height, "cells");
+    addField("Preset", m_presets, wxString());
 
     wxStdDialogButtonSizer* buttons = CreateStdDialogButtonSizer(wxOK | wxCANCEL);
 
-    ok_ = buttons->GetAffirmativeButton();
+    m_ok = buttons->GetAffirmativeButton();
 
     auto* column = new wxBoxSizer(wxVERTICAL);
     column->Add(fields, wxSizerFlags().Expand().DoubleBorder());
-    column->Add(keepPattern_, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT | wxBOTTOM));
-    column->Add(memory_, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT));
-    column->Add(error_, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT | wxBOTTOM));
+    column->Add(m_keepPattern, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT | wxBOTTOM));
+    column->Add(m_memory, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT));
+    column->Add(m_error, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT | wxBOTTOM));
     column->Add(buttons, wxSizerFlags().Expand().DoubleBorder(wxLEFT | wxRIGHT | wxBOTTOM));
     SetSizerAndFit(column);
     CentreOnParent();
 
     // Typing sends wxEVT_TEXT but no spin event, so both are needed for a live check.
-    for (wxSpinCtrl* spin : {width_, height_})
+    for (wxSpinCtrl* spin : {m_width, m_height})
     {
         spin->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) { revalidate(); });
         spin->Bind(wxEVT_TEXT, [this](wxCommandEvent&) { revalidate(); });
     }
-    presets_->Bind(wxEVT_CHOICE,
-                   [this](wxCommandEvent& event) { applyPreset(event.GetSelection()); });
+    m_presets->Bind(wxEVT_CHOICE,
+                    [this](wxCommandEvent& event) { applyPreset(event.GetSelection()); });
     revalidate();
 }
 
@@ -180,20 +180,20 @@ std::optional<WorldSizeRequest> WorldSizeDialog::request() const
     {
         return std::nullopt;
     }
-    return WorldSizeRequest{.extent = *extent, .keepPattern = keepPattern_->GetValue()};
+    return WorldSizeRequest{.extent = *extent, .keepPattern = m_keepPattern->GetValue()};
 }
 
 std::expected<core::Extent, std::string> WorldSizeDialog::typedExtent() const
 {
-    const std::optional<core::Coord> width  = typedSide(*width_);
-    const std::optional<core::Coord> height = typedSide(*height_);
+    const std::optional<core::Coord> width  = typedSide(*m_width);
+    const std::optional<core::Coord> height = typedSide(*m_height);
     if (!width || !height)
     {
         return std::unexpected(std::string(kNotWholeNumbers));
     }
     const core::Extent extent{.width = *width, .height = *height};
-    return core::validateExtent(extent, budget_).transform_error([&](core::ExtentError error) {
-        return core::describe(error, extent, budget_);
+    return core::validateExtent(extent, m_budget).transform_error([&](core::ExtentError error) {
+        return core::describe(error, extent, m_budget);
     });
 }
 
@@ -203,7 +203,7 @@ void WorldSizeDialog::applyPreset(int index)
     {
         return;  // "Choose…" is only a caption
     }
-    core::Extent extent = fitsCanvas_;
+    core::Extent extent = m_fitsCanvas;
     if (index < kFitWindowIndex)
     {
         const core::Coord side =
@@ -212,9 +212,9 @@ void WorldSizeDialog::applyPreset(int index)
         extent = {.width = side, .height = side};
     }
     // Programmatic SetValue sends no events, so revalidate() is called directly.
-    width_->SetValue(extent.width);
-    height_->SetValue(extent.height);
-    presets_->SetSelection(kChooseIndex);
+    m_width->SetValue(extent.width);
+    m_height->SetValue(extent.height);
+    m_presets->SetSelection(kChooseIndex);
     revalidate();
 }
 
@@ -223,9 +223,9 @@ void WorldSizeDialog::revalidate()
     const std::expected<core::Extent, std::string> extent = typedExtent();
     // Only a valid size has a memory figure; the error line explains the others.
     const std::string bytes = extent ? core::formatBytes(core::worldBytes(*extent)) : "–";
-    memory_->SetLabelText(toWx(memoryText(bytes, budget_)));
-    error_->SetLabelText(extent ? wxString() : toWx(extent.error()));
-    ok_->Enable(extent.has_value());
+    m_memory->SetLabelText(toWx(memoryText(bytes, m_budget)));
+    m_error->SetLabelText(extent ? wxString() : toWx(extent.error()));
+    m_ok->Enable(extent.has_value());
 }
 
 }  // namespace wxLife::ui

@@ -12,6 +12,7 @@ CMakeUserPresets.json
 .claude/settings.local.json
 *.swp
 *~
+.DS_Store
 
 # Editors: share only the four VS Code files the template provides
 .vscode/*
@@ -20,3 +21,8 @@ CMakeUserPresets.json
 !.vscode/tasks.json
 !.vscode/launch.json
 .idea/
+.vs/
+
+# ccache directory used by CI
+.ccache/
+*.orig

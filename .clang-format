@@ -36,6 +36,9 @@ RemoveBracesLLVM: false
 SpaceInEmptyBraces: Always
 TabWidth: 4
 # Include order after the file's own header: C headers, standard library, third-party, this project.
+# The header under test stays the first include of MyClassTests.cpp / name_tests.cpp. Only the project's own
+# suffixes are recognised (not Google's _test/_unittest), so a misnamed test file is visibly formatted differently.
+IncludeIsMainRegex: '(_tests|Tests)?$'
 IncludeCategories:
   - Regex: '^<(sys/)?[a-z0-9_]+\.h>$'
     Priority: 1

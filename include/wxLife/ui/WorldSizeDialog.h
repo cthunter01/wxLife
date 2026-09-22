@@ -49,16 +49,16 @@ private:
     /// Updates the memory and error lines; enables OK only for valid sizes.
     void revalidate();
 
-    core::Extent  fitsCanvas_;
-    std::uint64_t budget_;
+    core::Extent  m_fitsCanvas;
+    std::uint64_t m_budget;
     // Child controls, owned by wx.
-    wxSpinCtrl*   width_{};
-    wxSpinCtrl*   height_{};
-    wxChoice*     presets_{};
-    wxCheckBox*   keepPattern_{};
-    wxStaticText* memory_{};
-    wxStaticText* error_{};
-    wxButton*     ok_{};  ///< From CreateStdDialogButtonSizer(...)->GetAffirmativeButton()
+    wxSpinCtrl*   m_width{};
+    wxSpinCtrl*   m_height{};
+    wxChoice*     m_presets{};
+    wxCheckBox*   m_keepPattern{};
+    wxStaticText* m_memory{};
+    wxStaticText* m_error{};
+    wxButton*     m_ok{};  ///< From CreateStdDialogButtonSizer(...)->GetAffirmativeButton()
 };
 
 }  // namespace wxLife::ui

@@ -13,61 +13,61 @@ namespace wxLife::core
 Grid::Grid() : Grid(Extent{}) { }
 
 Grid::Grid(Extent extent)
-  : extent_(extent),
-    stride_(static_cast<std::size_t>(extent.width) + 2),
-    cells_(stride_ * (static_cast<std::size_t>(extent.height) + 2), kDead)
+  : m_extent(extent),
+    m_stride(static_cast<std::size_t>(extent.width) + 2),
+    m_cells(m_stride * (static_cast<std::size_t>(extent.height) + 2), kDead)
 {
     assert(extent.width >= 0 && extent.height >= 0);
 }
 
 Extent Grid::extent() const noexcept
 {
-    return extent_;
+    return m_extent;
 }
 
 std::size_t Grid::paddedIndex(Coord x, Coord y) const noexcept
 {
-    return (static_cast<std::size_t>(y + 1) * stride_) + static_cast<std::size_t>(x + 1);
+    return (static_cast<std::size_t>(y + 1) * m_stride) + static_cast<std::size_t>(x + 1);
 }
 
 Cell Grid::at(CellPos p) const noexcept
 {
-    assert(extent_.contains(p));
-    return cells_[paddedIndex(p.x, p.y)];
+    assert(m_extent.contains(p));
+    return m_cells[paddedIndex(p.x, p.y)];
 }
 
 void Grid::set(CellPos p, Cell value) noexcept
 {
-    assert(extent_.contains(p) && (value == kDead || value == kAlive));
-    cells_[paddedIndex(p.x, p.y)] = value;
+    assert(m_extent.contains(p) && (value == kDead || value == kAlive));
+    m_cells[paddedIndex(p.x, p.y)] = value;
 }
 
 std::span<const Cell> Grid::row(Coord y) const noexcept
 {
-    return std::span(cells_).subspan(paddedIndex(0, y), static_cast<std::size_t>(extent_.width));
+    return std::span(m_cells).subspan(paddedIndex(0, y), static_cast<std::size_t>(m_extent.width));
 }
 
 std::span<Cell> Grid::row(Coord y) noexcept
 {
-    return std::span(cells_).subspan(paddedIndex(0, y), static_cast<std::size_t>(extent_.width));
+    return std::span(m_cells).subspan(paddedIndex(0, y), static_cast<std::size_t>(m_extent.width));
 }
 
 std::span<const Cell> Grid::paddedRow(Coord y) const noexcept
 {
-    return std::span(cells_).subspan(paddedIndex(-1, y), stride_);
+    return std::span(m_cells).subspan(paddedIndex(-1, y), m_stride);
 }
 
 void Grid::updateBorder(Topology topology) noexcept
 {
-    const auto width  = static_cast<std::size_t>(extent_.width);
-    const auto height = static_cast<std::size_t>(extent_.height);
+    const auto width  = static_cast<std::size_t>(m_extent.width);
+    const auto height = static_cast<std::size_t>(m_extent.height);
     // Padded row 0 is row -1 and padded row height + 1 is row height.
     const auto paddedRowAt = [this](std::size_t index) {
-        return std::span(cells_).subspan(index * stride_, stride_);
+        return std::span(m_cells).subspan(index * m_stride, m_stride);
     };
 
     // An empty grid has no opposite edge to copy from.
-    if (extent_.cellCount() == 0)
+    if (m_extent.cellCount() == 0)
     {
         topology = Topology::Bounded;
     }
@@ -104,13 +104,13 @@ void Grid::updateBorder(Topology topology) noexcept
 
 void Grid::clear() noexcept
 {
-    std::ranges::fill(cells_, kDead);
+    std::ranges::fill(m_cells, kDead);
 }
 
 CellCount Grid::countAlive() const noexcept
 {
     CellCount alive = 0;
-    for (Coord y = 0; y < extent_.height; ++y)
+    for (Coord y = 0; y < m_extent.height; ++y)
     {
         alive += std::ranges::count(row(y), kAlive);
     }
@@ -119,11 +119,11 @@ CellCount Grid::countAlive() const noexcept
 
 bool operator==(const Grid& a, const Grid& b) noexcept
 {
-    if (a.extent_ != b.extent_)
+    if (a.m_extent != b.m_extent)
     {
         return false;
     }
-    for (Coord y = 0; y < a.extent_.height; ++y)
+    for (Coord y = 0; y < a.m_extent.height; ++y)
     {
         if (!std::ranges::equal(a.row(y), b.row(y)))
         {

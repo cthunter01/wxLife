@@ -1,3 +1,5 @@
+#include "wxLife/core/Rule.h"
+
 #include <cstddef>
 #include <optional>
 #include <string>
@@ -6,7 +8,6 @@
 #include <gtest/gtest.h>
 
 #include "wxLife/core/Random.h"
-#include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 
 namespace wxLife::core

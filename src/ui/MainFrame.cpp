@@ -77,10 +77,11 @@ keys, such as Ctrl+Home and Ctrl+Delete)
     Ctrl+= and Ctrl+-: zoom    Ctrl+0: fit    Ctrl+Home: center    Ctrl+G: grid lines
     F1: this help    Ctrl+Q: quit)";
 
-// wx's generic status bar repaints the window synchronously (Update()) after every text change.
-// Under X11 that paint can come before GTK has laid out a slider moved in the same handler, and
-// the slider then keeps showing its old position. A plain refresh lets GTK lay everything out
-// first.
+#ifdef __WXGTK__
+// wx's generic status bar, which wxGTK uses, repaints the window synchronously (Update()) after
+// every text change. Under X11 that paint can come before GTK has laid out a slider moved in the
+// same handler, and the slider then keeps showing its old position. A plain refresh lets GTK lay
+// everything out first. (wxMSW's and wxOSX's status bars are not wxStatusBarGeneric.)
 class StatusBar final : public wxStatusBarGeneric
 {
 public:
@@ -96,6 +97,9 @@ protected:
         }
     }
 };
+#else
+using StatusBar = wxStatusBar;
+#endif
 
 [[nodiscard]] std::uint64_t freshSeed()
 {
@@ -117,9 +121,9 @@ protected:
     switch (kind)
     {
         case core::StepperKind::Banded:
-            return ID_ENGINE_BANDED;
+            return EngineBandedID;
         case core::StepperKind::Reference:
-            return ID_ENGINE_REFERENCE;
+            return EngineReferenceID;
     }
     std::unreachable();
 }
@@ -130,9 +134,9 @@ protected:
     switch (automaton)
     {
         case core::Automaton::Life:
-            return ID_AUTOMATON_LIFE;
+            return AutomatonLifeID;
         case core::Automaton::LangtonAnt:
-            return ID_AUTOMATON_ANT;
+            return AutomatonAntID;
     }
     std::unreachable();
 }
@@ -163,8 +167,8 @@ protected:
 
 MainFrame::MainFrame(core::World& world)
   : wxFrame(nullptr, wxID_ANY, "wxLife"),
-    world_(world),
-    runner_(world, [this](const TickReport& report) { onSimulationTick(report); })
+    m_world(world),
+    m_runner(world, [this](const TickReport& report) { onSimulationTick(report); })
 {
     SetMenuBar(buildMenuBar());
     auto* statusBar = new StatusBar(this);
@@ -175,9 +179,9 @@ MainFrame::MainFrame(core::World& world)
     buildLayout();
     bindCommands();
 
-    runner_.setSpeed(defaults::kSpeed);
-    world_.randomize(panel_->randomDensity(), freshSeed());
-    panel_->setRule(world_.rule());
+    m_runner.setSpeed(defaults::kSpeed);
+    m_world.randomize(m_panel->randomDensity(), freshSeed());
+    m_panel->setRule(m_world.rule());
     syncControls();
     updateStatusBar(true);
 
@@ -185,16 +189,16 @@ MainFrame::MainFrame(core::World& world)
     SetSize(FromDIP(wxSize(defaults::kFrameWidthDip, defaults::kFrameHeightDip)));
     Centre();
     // The world stays fitted until the user moves the camera, so it follows the frame's real size.
-    canvas_->fitWorld();
-    canvas_->SetFocus();
+    m_canvas->fitWorld();
+    m_canvas->SetFocus();
 }
 
 void MainFrame::buildLayout()
 {
-    panel_ = new ControlPanel(this);
-    panel_->SetMinSize(FromDIP(wxSize(defaults::kControlPanelWidthDip, -1)));
-    canvas_ = new WorldCanvas(
-        this, world_,
+    m_panel = new ControlPanel(this);
+    m_panel->SetMinSize(FromDIP(wxSize(defaults::kControlPanelWidthDip, -1)));
+    m_canvas = new WorldCanvas(
+        this, m_world,
         {
             .paintCells   = [this](std::span<const core::CellPos> cells,
                                    core::Cell value) { onPaintCells(cells, value); },
@@ -204,8 +208,8 @@ void MainFrame::buildLayout()
         });
 
     auto* row = new wxBoxSizer(wxHORIZONTAL);
-    row->Add(panel_, wxSizerFlags(0).Expand());
-    row->Add(canvas_, wxSizerFlags(1).Expand());
+    row->Add(m_panel, wxSizerFlags(0).Expand());
+    row->Add(m_canvas, wxSizerFlags(1).Expand());
     SetSizer(row);
 }
 
@@ -213,32 +217,32 @@ void MainFrame::bindCommands()
 {
     using Handler                = void (MainFrame::*)();
     static constexpr auto kTable = std::to_array<std::pair<CommandId, Handler>>({
-        {ID_RUN_PAUSE, &MainFrame::onRunPause},
-        {ID_STEP, &MainFrame::onStep},
-        {ID_CLEAR, &MainFrame::onClear},
-        {ID_RANDOMIZE, &MainFrame::onRandomize},
-        {ID_FASTER, &MainFrame::onFaster},
-        {ID_SLOWER, &MainFrame::onSlower},
-        {ID_TOGGLE_MAX_SPEED, &MainFrame::onToggleMaxSpeed},
-        {ID_SPEED_CHANGED, &MainFrame::onSpeedChanged},
-        {ID_AUTOMATON_LIFE, &MainFrame::onAutomatonLife},
-        {ID_AUTOMATON_ANT, &MainFrame::onAutomatonAnt},
-        {ID_AUTOMATON_CHANGED, &MainFrame::onAutomatonChanged},
-        {ID_RESET_ANTS, &MainFrame::onResetAnts},
-        {ID_ENGINE_BANDED, &MainFrame::onEngineBanded},
-        {ID_ENGINE_REFERENCE, &MainFrame::onEngineReference},
-        {ID_ZOOM_IN, &MainFrame::onZoomIn},
-        {ID_ZOOM_OUT, &MainFrame::onZoomOut},
-        {ID_ZOOM_FIT, &MainFrame::onZoomFit},
-        {ID_CENTER_VIEW, &MainFrame::onCenterView},
-        {ID_CELL_SIZE_CHANGED, &MainFrame::onCellSizeChanged},
-        {ID_TOGGLE_GRID, &MainFrame::onToggleGrid},
-        {ID_WORLD_SIZE, &MainFrame::onWorldSize},
-        {ID_TOGGLE_WRAP, &MainFrame::onToggleWrap},
-        {ID_APPLY_RULE, &MainFrame::onApplyRule},
-        {ID_RULE_PRESET, &MainFrame::onRulePreset},
-        {ID_FOCUS_RULE, &MainFrame::onFocusRule},
-        {ID_SHOW_CONTROLS_HELP, &MainFrame::onShowControlsHelp},
+        {RunPauseID, &MainFrame::onRunPause},
+        {StepID, &MainFrame::onStep},
+        {ClearID, &MainFrame::onClear},
+        {RandomizeID, &MainFrame::onRandomize},
+        {FasterID, &MainFrame::onFaster},
+        {SlowerID, &MainFrame::onSlower},
+        {ToggleMaxSpeedID, &MainFrame::onToggleMaxSpeed},
+        {SpeedChangedID, &MainFrame::onSpeedChanged},
+        {AutomatonLifeID, &MainFrame::onAutomatonLife},
+        {AutomatonAntID, &MainFrame::onAutomatonAnt},
+        {AutomatonChangedID, &MainFrame::onAutomatonChanged},
+        {ResetAntsID, &MainFrame::onResetAnts},
+        {EngineBandedID, &MainFrame::onEngineBanded},
+        {EngineReferenceID, &MainFrame::onEngineReference},
+        {ZoomInID, &MainFrame::onZoomIn},
+        {ZoomOutID, &MainFrame::onZoomOut},
+        {ZoomFitID, &MainFrame::onZoomFit},
+        {CenterViewID, &MainFrame::onCenterView},
+        {CellSizeChangedID, &MainFrame::onCellSizeChanged},
+        {ToggleGridID, &MainFrame::onToggleGrid},
+        {WorldSizeID, &MainFrame::onWorldSize},
+        {ToggleWrapID, &MainFrame::onToggleWrap},
+        {ApplyRuleID, &MainFrame::onApplyRule},
+        {RulePresetID, &MainFrame::onRulePreset},
+        {FocusRuleID, &MainFrame::onFocusRule},
+        {ShowControlsHelpID, &MainFrame::onShowControlsHelp},
     });
     for (const auto& [id, handler] : kTable)
     {
@@ -248,10 +252,10 @@ void MainFrame::bindCommands()
             // again. The canvas takes the focus back, except after Apply, so that a rejected rule
             // can be fixed.
             const wxObject* source = event.GetEventObject();
-            if (id != ID_APPLY_RULE &&
+            if (id != ApplyRuleID &&
                 (dynamic_cast<const wxButton*>(source) || dynamic_cast<const wxCheckBox*>(source)))
             {
-                canvas_->SetFocus();
+                m_canvas->SetFocus();
             }
         };
         Bind(wxEVT_MENU, run, id);
@@ -263,7 +267,7 @@ void MainFrame::bindCommands()
     Bind(wxEVT_CHAR_HOOK, [this](wxKeyEvent& event) {
         if (event.GetModifiers() == wxMOD_CONTROL && event.GetKeyCode() == 'M')
         {
-            emitCommand(*this, ID_TOGGLE_MAX_SPEED);
+            emitCommand(*this, ToggleMaxSpeedID);
         }
         else
         {
@@ -275,57 +279,57 @@ void MainFrame::bindCommands()
 
 void MainFrame::onRunPause()
 {
-    runner_.toggle();
+    m_runner.toggle();
     syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::onStep()
 {
-    runner_.stepOnce();  // reports through onSimulationTick()
+    m_runner.stepOnce();  // reports through onSimulationTick()
     syncControls();
     updateStatusBar(true);  // the tick's own update may have been throttled
 }
 
 void MainFrame::onClear()
 {
-    world_.clear();
+    m_world.clear();
     worldContentChanged();
 }
 
 void MainFrame::onRandomize()
 {
-    world_.randomize(panel_->randomDensity(), freshSeed());
+    m_world.randomize(m_panel->randomDensity(), freshSeed());
     worldContentChanged();
 }
 
 void MainFrame::onFaster()
 {
-    runner_.setSpeed(runner_.speed().faster());
+    m_runner.setSpeed(m_runner.speed().faster());
     syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::onSlower()
 {
-    runner_.setSpeed(runner_.speed().slower());
+    m_runner.setSpeed(m_runner.speed().slower());
     syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::onToggleMaxSpeed()
 {
-    core::Speed speed = runner_.speed();
+    core::Speed speed = m_runner.speed();
 
     speed.unlimited = !speed.unlimited;
-    runner_.setSpeed(speed);
+    m_runner.setSpeed(speed);
     syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::onSpeedChanged()
 {
-    runner_.setSpeed(panel_->speed());
+    m_runner.setSpeed(m_panel->speed());
     syncControls();
     updateStatusBar(true);
 }
@@ -342,12 +346,12 @@ void MainFrame::onAutomatonAnt()
 
 void MainFrame::onAutomatonChanged()
 {
-    setAutomaton(panel_->selectedAutomaton());
+    setAutomaton(m_panel->selectedAutomaton());
 }
 
 void MainFrame::onResetAnts()
 {
-    world_.resetAnts(panel_->antCount());
+    m_world.resetAnts(m_panel->antCount());
     syncControls();
     worldContentChanged();
 }
@@ -360,7 +364,7 @@ void MainFrame::onEngineBanded()
 void MainFrame::onEngineReference()
 {
     // The menu item is disabled for larger worlds; this check keeps a stray event harmless.
-    if (world_.extent().cellCount() <= core::ReferenceStepper::kRecommendedMaxCells)
+    if (m_world.extent().cellCount() <= core::ReferenceStepper::kRecommendedMaxCells)
     {
         setEngine(core::StepperKind::Reference);
     }
@@ -373,53 +377,53 @@ void MainFrame::onEngineReference()
 // The canvas reports every camera change through onViewChanged().
 void MainFrame::onZoomIn()
 {
-    canvas_->zoomBy(1);
+    m_canvas->zoomBy(1);
 }
 
 void MainFrame::onZoomOut()
 {
-    canvas_->zoomBy(-1);
+    m_canvas->zoomBy(-1);
 }
 
 void MainFrame::onZoomFit()
 {
-    canvas_->fitWorld();
+    m_canvas->fitWorld();
 }
 
 void MainFrame::onCenterView()
 {
-    canvas_->centerWorld();
+    m_canvas->centerWorld();
 }
 
 void MainFrame::onCellSizeChanged()
 {
-    canvas_->setCellSize(panel_->cellSize());
+    m_canvas->setCellSize(m_panel->cellSize());
 }
 
 void MainFrame::onToggleGrid()
 {
-    canvas_->setShowGrid(!canvas_->showGrid());
+    m_canvas->setShowGrid(!m_canvas->showGrid());
     syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::onWorldSize()
 {
-    const bool wasRunning = runner_.isRunning();
-    runner_.stop();
-    canvas_->cancelStroke();
+    const bool wasRunning = m_runner.isRunning();
+    m_runner.stop();
+    m_canvas->cancelStroke();
 
     const auto request =
-        WorldSizeDialog::ask(this, world_.extent(), canvas_->cellsThatFit(), memoryBudget_);
+        WorldSizeDialog::ask(this, m_world.extent(), m_canvas->cellsThatFit(), m_memoryBudget);
     // The dialog accepts only valid sizes; checking again keeps the budget safe whatever the
     // dialog does.
-    if (request && core::validateExtent(request->extent, memoryBudget_))
+    if (request && core::validateExtent(request->extent, m_memoryBudget))
     {
         try
         {
             const wxBusyCursor busy;
-            world_.resize(request->extent, request->keepPattern);
-            canvas_->worldExtentChanged();  // at once, so no paint sees the old extent
+            m_world.resize(request->extent, request->keepPattern);
+            m_canvas->worldExtentChanged();  // at once, so no paint sees the old extent
         }
         catch (const std::bad_alloc&)
         {
@@ -429,8 +433,8 @@ void MainFrame::onWorldSize()
                 countText(request->extent.width), countText(request->extent.height));
             wxMessageBox(toWx(message), "World Size", wxOK | wxICON_ERROR, this);
         }
-        if (world_.stepper().kind() == core::StepperKind::Reference &&
-            world_.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
+        if (m_world.stepper().kind() == core::StepperKind::Reference &&
+            m_world.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
         {
             setEngine(core::StepperKind::Banded);
         }
@@ -438,7 +442,7 @@ void MainFrame::onWorldSize()
 
     if (wasRunning)
     {
-        runner_.start();
+        m_runner.start();
     }
     syncControls();
     updateStatusBar(true);
@@ -446,18 +450,18 @@ void MainFrame::onWorldSize()
 
 void MainFrame::onToggleWrap()
 {
-    const bool torus = world_.topology() == core::Topology::Torus;
-    world_.setTopology(torus ? core::Topology::Bounded : core::Topology::Torus);
+    const bool torus = m_world.topology() == core::Topology::Torus;
+    m_world.setTopology(torus ? core::Topology::Bounded : core::Topology::Torus);
     syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::onApplyRule()
 {
-    const auto rule = core::Rule::parse(panel_->ruleText());
+    const auto rule = core::Rule::parse(m_panel->ruleText());
     if (!rule)
     {
-        panel_->setRuleError(core::describe(rule.error()));  // the current rule stays
+        m_panel->setRuleError(core::describe(rule.error()));  // the current rule stays
         return;
     }
     applyRule(*rule);
@@ -465,7 +469,7 @@ void MainFrame::onApplyRule()
 
 void MainFrame::onRulePreset()
 {
-    if (const auto preset = panel_->selectedPreset())  // "Custom" does nothing
+    if (const auto preset = m_panel->selectedPreset())  // "Custom" does nothing
     {
         applyRule(core::kRulePresets.at(*preset).rule);
     }
@@ -473,11 +477,11 @@ void MainFrame::onRulePreset()
 
 void MainFrame::onFocusRule()
 {
-    if (world_.automaton() != core::Automaton::Life)
+    if (m_world.automaton() != core::Automaton::Life)
     {
         return;  // the Rule group is greyed out, so there is nothing to focus
     }
-    panel_->focusRuleText();
+    m_panel->focusRuleText();
 }
 
 void MainFrame::onShowControlsHelp()
@@ -497,9 +501,9 @@ void MainFrame::onAbout()
 
 void MainFrame::onClose(wxCloseEvent& event)
 {
-    runner_.stop();
+    m_runner.stop();
     // wx asserts if a window is destroyed while it holds the mouse capture.
-    canvas_->cancelStroke();
+    m_canvas->cancelStroke();
     event.Skip();  // wx destroys the frame and its children
     // There is deliberately no destructor calling DestroyChildren(): the menubar is a child
     // window whose deletion does not clear the frame's pointer to it, so it would be deleted
@@ -508,13 +512,13 @@ void MainFrame::onClose(wxCloseEvent& event)
 
 void MainFrame::onSimulationTick(const TickReport& /*report*/)
 {
-    canvas_->Refresh(false);
+    m_canvas->Refresh(false);
     updateStatusBar(false);
 }
 
 void MainFrame::onPaintCells(std::span<const core::CellPos> cells, core::Cell value)
 {
-    if (world_.setCells(cells, value) > 0)
+    if (m_world.setCells(cells, value) > 0)
     {
         worldContentChanged();
     }
@@ -522,46 +526,46 @@ void MainFrame::onPaintCells(std::span<const core::CellPos> cells, core::Cell va
 
 void MainFrame::onToggleAnt(core::CellPos cell)
 {
-    if (world_.automaton() != core::Automaton::LangtonAnt)
+    if (m_world.automaton() != core::Automaton::LangtonAnt)
     {
         return;  // Ctrl+click means nothing to Life
     }
-    world_.toggleAntAt(cell);
+    m_world.toggleAntAt(cell);
     syncControls();  // the panel's ant count follows the model
     worldContentChanged();
 }
 
 void MainFrame::onViewChanged()
 {
-    panel_->setCellSize(canvas_->cellSize());
+    m_panel->setCellSize(m_canvas->cellSize());
     updateStatusBar(true);
 }
 
 void MainFrame::onHoverChanged(std::optional<core::CellPos> cell)
 {
-    hovered_ = cell;
+    m_hovered = cell;
     updateStatusBar(true);
 }
 
 void MainFrame::applyRule(const core::Rule& rule)
 {
-    world_.setRule(rule);
-    panel_->setRule(rule);
+    m_world.setRule(rule);
+    m_panel->setRule(rule);
     updateStatusBar(true);
 }
 
 void MainFrame::setAutomaton(core::Automaton automaton)
 {
-    world_.setAutomaton(automaton);
+    m_world.setAutomaton(automaton);
     syncControls();
     worldContentChanged();  // the ants appear or disappear, so the canvas has to be redrawn
 }
 
 void MainFrame::setEngine(core::StepperKind kind)
 {
-    if (world_.stepper().kind() != kind)
+    if (m_world.stepper().kind() != kind)
     {
-        world_.setStepper(core::makeStepper(kind));
+        m_world.setStepper(core::makeStepper(kind));
     }
     syncControls();
     updateStatusBar(true);
@@ -569,69 +573,69 @@ void MainFrame::setEngine(core::StepperKind kind)
 
 void MainFrame::worldContentChanged()
 {
-    canvas_->Refresh(false);
+    m_canvas->Refresh(false);
     updateStatusBar(true);
 }
 
 void MainFrame::syncControls()
 {
-    const bool         running = runner_.isRunning();
-    const core::Speed  speed   = runner_.speed();
-    const core::Extent extent  = world_.extent();
-    const bool         torus   = world_.topology() == core::Topology::Torus;
+    const bool         running = m_runner.isRunning();
+    const core::Speed  speed   = m_runner.speed();
+    const core::Extent extent  = m_world.extent();
+    const bool         torus   = m_world.topology() == core::Topology::Torus;
     // Life reads the rule, the topology and the engine. The ant reads none of them, and has ants
     // instead.
-    const bool life = world_.automaton() == core::Automaton::Life;
+    const bool life = m_world.automaton() == core::Automaton::Life;
 
     // The rule text is left alone, so text the user is still editing survives.
-    panel_->setRunning(running);
-    panel_->setAutomaton(world_.automaton());
-    panel_->setAntCount(static_cast<int>(world_.ants().size()));
-    panel_->setSpeed(speed);
-    panel_->setCellSize(canvas_->cellSize());
-    panel_->setShowGrid(canvas_->showGrid());
-    panel_->setWrap(torus);
-    panel_->setWorldInfo(extent, core::worldBytes(extent));
+    m_panel->setRunning(running);
+    m_panel->setAutomaton(m_world.automaton());
+    m_panel->setAntCount(static_cast<int>(m_world.ants().size()));
+    m_panel->setSpeed(speed);
+    m_panel->setCellSize(m_canvas->cellSize());
+    m_panel->setShowGrid(m_canvas->showGrid());
+    m_panel->setWrap(torus);
+    m_panel->setWorldInfo(extent, core::worldBytes(extent));
 
     wxMenuBar& menus = *GetMenuBar();
-    menus.Check(ID_TOGGLE_MAX_SPEED, speed.unlimited);
-    menus.Check(ID_TOGGLE_GRID, canvas_->showGrid());
-    menus.Check(ID_TOGGLE_WRAP, torus);
-    menus.Check(automatonMenuItem(world_.automaton()), true);  // radio items: the others turn off
-    menus.Check(engineMenuItem(world_.stepper().kind()), true);
-    menus.Enable(ID_ENGINE_BANDED, life);
-    menus.Enable(ID_ENGINE_REFERENCE,
+    menus.Check(ToggleMaxSpeedID, speed.unlimited);
+    menus.Check(ToggleGridID, m_canvas->showGrid());
+    menus.Check(ToggleWrapID, torus);
+    menus.Check(automatonMenuItem(m_world.automaton()), true);  // radio items: the others turn off
+    menus.Check(engineMenuItem(m_world.stepper().kind()), true);
+    menus.Enable(EngineBandedID, life);
+    menus.Enable(EngineReferenceID,
                  life && extent.cellCount() <= core::ReferenceStepper::kRecommendedMaxCells);
-    menus.Enable(ID_TOGGLE_WRAP, life);
-    menus.Enable(ID_FOCUS_RULE, life);
-    menus.Enable(ID_RESET_ANTS, !life);
-    menus.SetLabel(ID_RUN_PAUSE, running ? "&Pause\tF5" : "&Run\tF5");
+    menus.Enable(ToggleWrapID, life);
+    menus.Enable(FocusRuleID, life);
+    menus.Enable(ResetAntsID, !life);
+    menus.SetLabel(RunPauseID, running ? "&Pause\tF5" : "&Run\tF5");
 }
 
 void MainFrame::updateStatusBar(bool force)
 {
     const core::Clock::time_point now = core::Clock::now();
-    if (!force && now - lastStatusUpdate_ < defaults::kStatusRefresh)
+    if (!force && now - m_lastStatusUpdate < defaults::kStatusRefresh)
     {
         return;
     }
-    lastStatusUpdate_ = now;
+    m_lastStatusUpdate = now;
 
-    const bool        running  = runner_.isRunning();
-    const core::Speed speed    = runner_.speed();
-    const int         cellSize = canvas_->cellSize();
+    const bool        running  = m_runner.isRunning();
+    const core::Speed speed    = m_runner.speed();
+    const int         cellSize = m_canvas->cellSize();
 
     // Only the target until a rate has been measured.
     std::string speedText = core::toString(speed);
-    if (const std::optional<double> rate = runner_.measuredRate(); running && rate)
+    if (const std::optional<double> rate = m_runner.measuredRate(); running && rate)
     {
         speedText = speed.unlimited ? std::format("Max ({} gen/s)", countText(std::llround(*rate)))
                                     : std::format("{} ({:.1f})", speedText, *rate);
     }
 
-    std::string viewText = hovered_ ? std::format("({}, {})", hovered_->x, hovered_->y) : "–";
+    std::string viewText = m_hovered ? std::format("({}, {})", m_hovered->x, m_hovered->y) : "–";
     viewText += std::format(" · {} px", cellSize);
-    const render::RenderStyle& style = canvas_->style();
+    const render::RenderStyle& style = m_canvas->style();
     if (style.showGrid && !style.gridVisibleAt(cellSize))
     {
         viewText += std::format(" · grid hidden < {} px", style.minCellSizeForGrid);
@@ -639,10 +643,10 @@ void MainFrame::updateStatusBar(bool force)
 
     const std::array<std::string, kStatusWidths.size()> fields{
         running ? "Running" : "Paused",
-        std::format("Gen {}", core::formatCount(world_.generation())),
-        std::format("Pop {}", countText(world_.population())),
+        std::format("Gen {}", core::formatCount(m_world.generation())),
+        std::format("Pop {}", countText(m_world.population())),
         speedText,
-        worldText(world_),
+        worldText(m_world),
         viewText,
     };
     // SetStatusText() ignores unchanged text, so rewriting every field is cheap.

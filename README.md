@@ -1,7 +1,7 @@
 # wxLife
 
-wxLife is Conway's Game of Life for Linux, written in C++23 with a wxWidgets 3.2 (GTK 3) interface. It
-runs Conway's Life and any other two-state B/S rule on worlds with sides of up to 100,000 cells, as far
+wxLife is Conway's Game of Life for Linux, macOS and Windows, written in C++23 with a wxWidgets 3.2
+interface (GTK 3 on Linux, Cocoa on macOS, Win32 on Windows). It runs Conway's Life and any other two-state B/S rule on worlds with sides of up to 100,000 cells, as far
 as a memory budget allows, with wrapping or dead edges, and it also runs Langton's ant on the same
 worlds. The code is split into small layers so it is easy to study and extend. A 1000 × 1000 world runs
 smoothly at every zoom level, and a 10000 × 10000 world stays usable.
@@ -22,8 +22,8 @@ smoothly at every zoom level, and a 10000 × 10000 world stays usable.
   (a torus) or are dead.
 - Two engines:
   - **Banded** (the default) splits the rows of a large world into bands that run on several threads.
-    Its inner loop is built for AVX2 and for baseline x86-64, and the right version is chosen at load
-    time.
+    On x86-64 Linux its inner loop is built for AVX2 and for baseline x86-64, and the right version is
+    chosen at load time.
   - **Reference** counts neighbours the plain way. It is the specification that the tests compare the
     Banded engine against.
 - Speed from 1 to 1000 generations per second, or Max. The status bar shows the target and, once it has
@@ -34,75 +34,101 @@ smoothly at every zoom level, and a 10000 × 10000 world stays usable.
   shortcuts.
 - One cell can be one physical pixel on HiDPI screens. The colours follow the desktop's light or dark
   theme, also when it changes while the app runs.
-- wxWidgets is linked statically, so the binary needs no wxWidgets libraries. Besides GTK 3 it needs only
-  libSM, libICE and PCRE2 (`libpcre2-32`) from the system.
+- wxWidgets is linked statically, so the binary needs no wxWidgets libraries. On Linux it needs, besides
+  GTK 3, only libSM, libICE and PCRE2 (`libpcre2-32`) from the system. On macOS it needs only the system's
+  frameworks, and on Windows only the Microsoft Visual C++ runtime that every MSVC program needs.
 
 ## Requirements
 
-- Linux with GTK 3. Only Linux is built and tested.
+- Linux, macOS 13.3 or newer, or Windows 10 or newer (x64). CI builds wxLife and runs its tests on all
+  three; the app is developed and checked by hand on Linux.
 - CMake 3.28+ and Ninja.
-- GCC 14+ or Clang 18+ (C++23, including `<print>`). Tested with GCC 16 and Clang 22.
-- GTK 3 development files and pkg-config:
+- A C++23 compiler with `<print>`:
+  - Linux: GCC 14+ or Clang 18+. Tested with GCC 16 and Clang 22.
+  - macOS: Xcode 16.3+ or its Command Line Tools (Apple Clang 17+).
+  - Windows: Visual Studio 2022 17.7+ (MSVC) with the "Desktop development with C++" workload.
+- Linux only: GTK 3 development files and pkg-config:
   - Debian/Ubuntu: `libgtk-3-dev`
   - Fedora: `gtk3-devel`
   - Arch: `gtk3`
 
   The zlib, libpng, expat and PCRE2 development headers are needed too; GTK's development packages
   normally pull them in. Without them wxWidgets falls back to its bundled copies, and its bundled zlib
-  does not compile with GCC 14 or newer.
+  does not compile with GCC 14 or newer. macOS and Windows need nothing else: wxWidgets uses the system's
+  own toolkit there and builds its bundled libraries.
 - Network access on the first configure. CMake downloads wxWidgets 3.2.11 (27 MB, checked by SHA-256),
-  then builds it from source as static libraries. That build takes about half a minute on 20 cores and
-  is done once per build directory. GoogleTest is used from the system when installed, otherwise
+  then builds it from source as static libraries. That build takes about half a minute on 20 cores
+  (longer with MSVC) and is done once per build directory. GoogleTest is used from the system when installed, otherwise
   downloaded too.
 - Optional: clang-tidy, clang-format, llvm-cov/llvm-profdata (coverage), Doxygen and Graphviz (docs),
-  ccache (used automatically unless you set a compiler launcher yourself).
+  ccache (used automatically unless you set a compiler launcher yourself). On macOS, clang-tidy comes from
+  Homebrew (`brew install llvm`); coverage uses Xcode's llvm-cov.
 
 ## Build, run and test
 
+Linux and macOS:
 ```sh
 cmake --workflow --preset dev          # configure + build + test, Clang Debug
-./build/clang-debug/bin/wxLife
+./build/clang-debug/bin/wxLife         # Linux
+open build/clang-debug/bin/wxLife.app  # macOS
 ```
 
-| Preset | What it is |
-| --- | --- |
-| `clang-debug`, `clang-release`, `gcc-debug`, `gcc-release` | Everyday builds |
-| `asan` | Clang Debug with AddressSanitizer + UndefinedBehaviorSanitizer; undefined behaviour stops the program |
-| `tsan` | Clang RelWithDebInfo with ThreadSanitizer. No UI: GTK is not instrumented |
-| `headless` | GCC Debug without the UI and without the wxWidgets download, for fast work on `core` and `render`. Builds only the baseline stepping loop (no AVX2 version), so its tests cover that one |
-| `tidy` | Clang Debug running clang-tidy on every file; findings are errors |
-| `coverage` | `cmake --workflow --preset coverage` writes `build/coverage/coverage/html/index.html` |
-| `ci-gcc`, `ci-clang` | Release builds with warnings as errors, as run in CI |
+Windows, from a **Developer PowerShell for VS** (Ninja needs MSVC's environment; VS Code's CMake Tools and
+Visual Studio set it up themselves):
+```powershell
+cmake --workflow --preset dev-msvc     # configure + build + test, MSVC Debug
+.\build\msvc-debug\bin\wxLife.exe
+```
 
-Each workflow preset (`dev`, `ci-gcc`, `ci-clang`, `asan`, `tsan`, `headless`, `tidy`, `coverage`)
-configures, builds and tests in one command. Separate steps: `cmake --preset <p>`,
+| Preset | Platforms | What it is |
+| --- | --- | --- |
+| `clang-debug`, `clang-release` | Linux, macOS | Everyday builds (Apple Clang on macOS) |
+| `gcc-debug`, `gcc-release` | Linux | Everyday builds |
+| `msvc-debug`, `msvc-release` | Windows | Everyday builds |
+| `asan` | Linux, macOS | Clang Debug with AddressSanitizer + UndefinedBehaviorSanitizer; undefined behaviour stops the program |
+| `tsan` | Linux, macOS | Clang RelWithDebInfo with ThreadSanitizer. No UI: GTK is not instrumented |
+| `headless` | Linux | GCC Debug without the UI and without the wxWidgets download, for fast work on `core` and `render`. Builds only the baseline stepping loop (no AVX2 version), so its tests cover that one |
+| `tidy` | Linux, macOS | Clang Debug running clang-tidy on every file; findings are errors |
+| `coverage` | Linux, macOS | `cmake --workflow --preset coverage` writes `build/coverage/coverage/html/index.html` |
+| `ci-gcc`, `ci-clang`, `ci-msvc` | as their compiler | Release builds with warnings as errors, as run in CI |
+
+A preset exists only on the platforms it supports; `cmake --list-presets` shows the ones for this machine.
+Each workflow preset (`dev`, `dev-msvc`, `ci-gcc`, `ci-clang`, `ci-msvc`, `asan`, `tsan`, `headless`,
+`tidy`, `coverage`) configures, builds and tests in one command. Separate steps: `cmake --preset <p>`,
 `cmake --build --preset <p>`, `ctest --preset <p>`. Each preset builds in `build/<preset>/`, with the
 programs in `build/<preset>/bin/`.
 
-Debug builds turn on `_GLIBCXX_ASSERTIONS`. The stepping loop and the rasterizer are compiled with `-O3`
-in every build type, so Debug builds stay responsive.
+CI (GitHub Actions) builds and tests on all three platforms: Linux (`ci-gcc`, `ci-clang`, `asan`,
+`tidy`), macOS (`ci-clang`) and Windows (`ci-msvc`).
+
+Debug builds check the standard library: `_GLIBCXX_ASSERTIONS` for libstdc++ (Linux), the extensive
+hardening mode for libc++ (macOS), and MSVC's Debug library checks itself. With GCC and Clang, the
+stepping loop and the rasterizer are compiled with `-O3` in every build type, so Debug builds stay
+responsive.
 
 **What gets built:**
 
 | Target | What it is |
 |---|---|
-| `wxLife` | The app |
+| `wxLife` | The app (`wxLife.app` on macOS) |
 | `wxLife_lib` | The simulation and its rendering (`core`, `render`); never uses wx |
 | `wxLife_ui` | The wxWidgets interface (`ui`, `app`) |
-| `wxLife_tests` | All GoogleTest suites: unit tests for `core` and `render`, and the GUI smoke tests |
+| `wxLife_tests` | All GoogleTest suites: unit tests for `core` and `render`, and on Linux the GUI smoke tests |
 | `wxLife_bench` | Headless stepping benchmark |
 | `docs` | API documentation (not built by default) |
 
 **CTest runs:**
 - the unit tests. They need no display;
-- the GUI smoke tests (`GuiSmokeTest.*`, label `gui`), which drive the real main window. Each one opens
-  a window, so they run one at a time. They are skipped when no display is set (`DISPLAY`,
+- on Linux, the GUI smoke tests (`GuiSmokeTest.*`, label `gui`), which drive the real main window. They
+  are built only with wxGTK, because they type through GTK's own text entry and check GTK's behaviour.
+  Each one opens a window, so they run one at a time. They are skipped when no display is set (`DISPLAY`,
   `WAYLAND_DISPLAY` and `BROADWAY_DISPLAY` all empty, and `GDK_BACKEND` not naming broadway), and they
   fail when a display is set but GTK cannot open any. `ctest --preset clang-debug -LE gui` leaves them
   out. To keep their windows off your desktop, run them on GTK's Broadway backend:
   `broadwayd :5 &` and then `GDK_BACKEND=broadway BROADWAY_DISPLAY=:5 ctest --preset clang-debug`;
 - `layering`, which fails if a layer includes code from a layer above it (see below);
-- `static_link`, which fails if `wxLife` loads a shared wxWidgets library.
+- `static_link`, which fails if `wxLife` loads a shared wxWidgets library (checked with `ldd` on Linux,
+  `otool -L` on macOS and `dumpbin /dependents` on Windows).
 
 **Benchmark:**
 
@@ -285,6 +311,8 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
 
 ## Troubleshooting
 
+The notes about GTK, X11 and Wayland apply to Linux only.
+
 - **Wayland oddities.** `GDK_BACKEND=x11 ./build/clang-debug/bin/wxLife` runs the app through XWayland.
   Use this to check whether a problem is specific to Wayland.
 - **Blurry 1 px cells.** With fractional scaling (for example 125% on KDE), the compositor resamples the
@@ -316,7 +344,8 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
 ## Manual smoke checklist
 
 The GUI smoke tests send wx events straight to the windows, so they do not exercise GTK's own key and
-mouse handling. Before a release, check these by hand, on X11 and on Wayland:
+mouse handling. Before a release, check these by hand, on X11 and on Wayland. On macOS and Windows, where
+the GUI smoke tests do not run at all, the whole list is the only check of the interface:
 
 - [ ] The 512² start-up world opens fully visible and centred, and stays fitted while the window is
       resized or maximised.

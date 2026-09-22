@@ -1,3 +1,5 @@
+#include "wxLife/core/World.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
@@ -20,7 +22,6 @@
 #include "wxLife/core/ReferenceStepper.h"
 #include "wxLife/core/Stepper.h"
 #include "wxLife/core/Types.h"
-#include "wxLife/core/World.h"
 
 namespace wxLife::core
 {
@@ -395,9 +396,16 @@ TEST(WorldTest, OneByOneWorld)
 }
 
 // Allocating an absurd size must throw without touching the world. Sanitizer allocators abort on
-// such requests instead of throwing, so the test is skipped there. (GCC 14 and Clang both have
-// __has_feature.)
+// such requests instead of throwing, so the test is skipped there. (GCC 14 and Clang have
+// __has_feature; MSVC does not, and an unknown macro called in an #if is an error there.)
+#ifdef __has_feature
 #if __has_feature(address_sanitizer) || __has_feature(thread_sanitizer)
+#define WXLIFE_SANITIZED_ALLOCATOR
+#endif
+#elif defined(__SANITIZE_ADDRESS__)  // MSVC's AddressSanitizer
+#define WXLIFE_SANITIZED_ALLOCATOR
+#endif
+#ifdef WXLIFE_SANITIZED_ALLOCATOR
 constexpr bool kSanitizedAllocator = true;
 #else
 constexpr bool kSanitizedAllocator = false;
@@ -405,7 +413,7 @@ constexpr bool kSanitizedAllocator = false;
 
 TEST(WorldTest, FailedResizeLeavesTheWorldUnchanged)
 {
-    if (kSanitizedAllocator)
+    if constexpr (kSanitizedAllocator)
     {
         GTEST_SKIP() << "sanitizer allocators do not throw std::bad_alloc";
     }

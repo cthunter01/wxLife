@@ -83,15 +83,15 @@ private:
     /// Puts the ants back on their starting spots, keeping how many there are. Never allocates.
     void layOutAnts() noexcept;
 
-    Grid                     current_;
-    Grid                     next_;  ///< Only Life steps into it; the ants use current_ alone.
-    Rule                     rule_;
-    Topology                 topology_;
-    Automaton                automaton_ = Automaton::Life;
-    std::vector<Ant>         ants_;
-    std::unique_ptr<Stepper> stepper_;
-    std::uint64_t            generation_ = 0;
-    CellCount                population_ = 0;
+    Grid                     m_current;
+    Grid                     m_next;  ///< Only Life steps into it; the ants use m_current alone.
+    Rule                     m_rule;
+    Topology                 m_topology;
+    Automaton                m_automaton = Automaton::Life;
+    std::vector<Ant>         m_ants;
+    std::unique_ptr<Stepper> m_stepper;
+    std::uint64_t            m_generation = 0;
+    CellCount                m_population = 0;
 };
 
 }  // namespace wxLife::core

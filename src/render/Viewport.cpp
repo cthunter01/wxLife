@@ -15,54 +15,55 @@ namespace wxLife::render
 
 void Viewport::setWorldExtent(core::Extent world) noexcept
 {
-    world_ = world;
+    m_world = world;
     clampOffset();
 }
 
 void Viewport::setCanvasSize(PixelSize canvas) noexcept
 {
-    canvas_ = {.width  = std::max<Pixel>(canvas.width, 0),
-               .height = std::max<Pixel>(canvas.height, 0)};
+    m_canvas = {.width  = std::max<Pixel>(canvas.width, 0),
+                .height = std::max<Pixel>(canvas.height, 0)};
     clampOffset();
 }
 
 core::Extent Viewport::worldExtent() const noexcept
 {
-    return world_;
+    return m_world;
 }
 
 PixelSize Viewport::canvasSize() const noexcept
 {
-    return canvas_;
+    return m_canvas;
 }
 
 int Viewport::cellSize() const noexcept
 {
-    return cellSize_;
+    return m_cellSize;
 }
 
 PixelPoint Viewport::offset() const noexcept
 {
-    return offset_;
+    return m_offset;
 }
 
 PixelSize Viewport::contentSize() const noexcept
 {
-    return {.width = Pixel{world_.width} * cellSize_, .height = Pixel{world_.height} * cellSize_};
+    return {.width  = Pixel{m_world.width} * m_cellSize,
+            .height = Pixel{m_world.height} * m_cellSize};
 }
 
 void Viewport::setCellSize(int px, PixelPoint anchor) noexcept
 {
     px = std::clamp(px, kMinCellSize, kMaxCellSize);
-    if (px == cellSize_)
+    if (px == m_cellSize)
     {
         return;
     }
-    auto& [runX, runY] = zoomRuns_;
-    const PixelPoint wanted{.x = zoomedOffset(runX, offset_.x, anchor.x, cellSize_, px),
-                            .y = zoomedOffset(runY, offset_.y, anchor.y, cellSize_, px)};
-    offset_   = wanted;
-    cellSize_ = px;
+    auto& [runX, runY] = m_zoomRuns;
+    const PixelPoint wanted{.x = zoomedOffset(runX, m_offset.x, anchor.x, m_cellSize, px),
+                            .y = zoomedOffset(runY, m_offset.y, anchor.y, m_cellSize, px)};
+    m_offset   = wanted;
+    m_cellSize = px;
     clampOffset();
 
     // An axis that clamping moved has lost its point, so its run ends. The other axis keeps its
@@ -71,15 +72,15 @@ void Viewport::setCellSize(int px, PixelPoint anchor) noexcept
         if (offset == wantedOffset)
         {
             run->offset   = offset;
-            run->cellSize = cellSize_;
+            run->cellSize = m_cellSize;
         }
         else
         {
             run.reset();
         }
     };
-    recordOrEnd(runX, offset_.x, wanted.x);
-    recordOrEnd(runY, offset_.y, wanted.y);
+    recordOrEnd(runX, m_offset.x, wanted.x);
+    recordOrEnd(runY, m_offset.y, wanted.y);
 }
 
 Pixel Viewport::zoomedOffset(std::optional<ZoomRun>& run, Pixel offset, Pixel anchor, int cellSize,
@@ -106,9 +107,9 @@ void Viewport::zoomBy(int steps, PixelPoint anchor) noexcept
     // Count from the current size, so a size between two entries moves to its neighbour
     // (7 px zooms out to 6 and in to 8) instead of first snapping to the nearest entry.
     const std::ptrdiff_t firstNotBelow =
-        std::ranges::lower_bound(kZoomSteps, cellSize_) - kZoomSteps.begin();
+        std::ranges::lower_bound(kZoomSteps, m_cellSize) - kZoomSteps.begin();
     const std::ptrdiff_t firstAbove =
-        std::ranges::upper_bound(kZoomSteps, cellSize_) - kZoomSteps.begin();
+        std::ranges::upper_bound(kZoomSteps, m_cellSize) - kZoomSteps.begin();
     const std::ptrdiff_t target = steps > 0 ? firstAbove + (steps - 1) : firstNotBelow + steps;
     const std::ptrdiff_t index  = std::clamp(target, std::ptrdiff_t{0}, std::ssize(kZoomSteps) - 1);
     setCellSize(kZoomSteps.at(static_cast<std::size_t>(index)), anchor);
@@ -121,42 +122,42 @@ void Viewport::fitWorld() noexcept
         return side > 0 ? canvas / side : Pixel{kMaxCellSize};
     };
     const Pixel size =
-        std::min(fits(canvas_.width, world_.width), fits(canvas_.height, world_.height));
-    cellSize_ = static_cast<int>(std::clamp(size, Pixel{kMinCellSize}, Pixel{kMaxCellSize}));
+        std::min(fits(m_canvas.width, m_world.width), fits(m_canvas.height, m_world.height));
+    m_cellSize = static_cast<int>(std::clamp(size, Pixel{kMinCellSize}, Pixel{kMaxCellSize}));
     const PixelSize content = contentSize();
 
-    offset_ = {.x = (content.width - canvas_.width) / 2,
-               .y = (content.height - canvas_.height) / 2};
+    m_offset = {.x = (content.width - m_canvas.width) / 2,
+                .y = (content.height - m_canvas.height) / 2};
     clampOffset();
 }
 
 void Viewport::centerOn(core::CellPos cell) noexcept
 {
     const auto axis = [this](core::Coord c, Pixel canvas) {
-        return (Pixel{c} * cellSize_) + (cellSize_ / 2) - (canvas / 2);
+        return (Pixel{c} * m_cellSize) + (m_cellSize / 2) - (canvas / 2);
     };
-    offset_ = {.x = axis(cell.x, canvas_.width), .y = axis(cell.y, canvas_.height)};
+    m_offset = {.x = axis(cell.x, m_canvas.width), .y = axis(cell.y, m_canvas.height)};
     clampOffset();
 }
 
 void Viewport::panBy(Pixel dx, Pixel dy) noexcept
 {
-    offset_ = {.x = offset_.x + dx, .y = offset_.y + dy};
+    m_offset = {.x = m_offset.x + dx, .y = m_offset.y + dy};
     clampOffset();
 }
 
 void Viewport::scrollTo(PixelPoint offset) noexcept
 {
-    offset_ = offset;
+    m_offset = offset;
     clampOffset();
 }
 
 std::optional<core::CellPos> Viewport::cellAt(PixelPoint canvasPoint) const noexcept
 {
     // Floor division: content pixels left of or above a centred world are negative.
-    const std::int64_t x = core::floorDiv(offset_.x + canvasPoint.x, cellSize_);
-    const std::int64_t y = core::floorDiv(offset_.y + canvasPoint.y, cellSize_);
-    if (x < 0 || y < 0 || x >= world_.width || y >= world_.height)
+    const std::int64_t x = core::floorDiv(m_offset.x + canvasPoint.x, m_cellSize);
+    const std::int64_t y = core::floorDiv(m_offset.y + canvasPoint.y, m_cellSize);
+    if (x < 0 || y < 0 || x >= m_world.width || y >= m_world.height)
     {
         return std::nullopt;
     }
@@ -166,22 +167,22 @@ std::optional<core::CellPos> Viewport::cellAt(PixelPoint canvasPoint) const noex
 core::CellPos Viewport::cellAtClamped(PixelPoint canvasPoint) const noexcept
 {
     const auto axis = [this](Pixel content, core::Coord side) {
-        const std::int64_t cell = core::floorDiv(content, cellSize_);
+        const std::int64_t cell = core::floorDiv(content, m_cellSize);
         return static_cast<core::Coord>(std::clamp<std::int64_t>(cell, 0, std::max(side - 1, 0)));
     };
-    return {.x = axis(offset_.x + canvasPoint.x, world_.width),
-            .y = axis(offset_.y + canvasPoint.y, world_.height)};
+    return {.x = axis(m_offset.x + canvasPoint.x, m_world.width),
+            .y = axis(m_offset.y + canvasPoint.y, m_world.height)};
 }
 
 PixelPoint Viewport::cellOrigin(core::CellPos cell) const noexcept
 {
-    return {.x = (Pixel{cell.x} * cellSize_) - offset_.x,
-            .y = (Pixel{cell.y} * cellSize_) - offset_.y};
+    return {.x = (Pixel{cell.x} * m_cellSize) - m_offset.x,
+            .y = (Pixel{cell.y} * m_cellSize) - m_offset.y};
 }
 
 core::CellRect Viewport::visibleCells() const noexcept
 {
-    if (canvas_.width == 0 || canvas_.height == 0)
+    if (m_canvas.width == 0 || m_canvas.height == 0)
     {
         return {};
     }
@@ -190,11 +191,11 @@ core::CellRect Viewport::visibleCells() const noexcept
         const auto clip = [side](std::int64_t cell) {
             return static_cast<core::Coord>(std::clamp<std::int64_t>(cell, 0, side));
         };
-        return std::pair{clip(core::floorDiv(offset, cellSize_)),
-                         clip(core::floorDiv(offset + canvas - 1, cellSize_) + 1)};
+        return std::pair{clip(core::floorDiv(offset, m_cellSize)),
+                         clip(core::floorDiv(offset + canvas - 1, m_cellSize) + 1)};
     };
-    const auto [x0, x1] = axis(offset_.x, canvas_.width, world_.width);
-    const auto [y0, y1] = axis(offset_.y, canvas_.height, world_.height);
+    const auto [x0, x1] = axis(m_offset.x, m_canvas.width, m_world.width);
+    const auto [y0, y1] = axis(m_offset.y, m_canvas.height, m_world.height);
     return {.x0 = x0, .y0 = y0, .x1 = x1, .y1 = y1};
 }
 
@@ -209,8 +210,8 @@ void Viewport::clampOffset() noexcept
     };
     const PixelSize content = contentSize();
 
-    offset_ = {.x = axis(offset_.x, content.width, canvas_.width),
-               .y = axis(offset_.y, content.height, canvas_.height)};
+    m_offset = {.x = axis(m_offset.x, content.width, m_canvas.width),
+                .y = axis(m_offset.y, content.height, m_canvas.height)};
 }
 
 }  // namespace wxLife::render

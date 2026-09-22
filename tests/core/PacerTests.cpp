@@ -1,3 +1,5 @@
+#include "wxLife/core/Pacer.h"
+
 #include <chrono>
 #include <cstdint>
 #include <limits>
@@ -6,7 +8,6 @@
 
 #include <gtest/gtest.h>
 
-#include "wxLife/core/Pacer.h"
 #include "wxLife/core/Speed.h"
 
 namespace wxLife::core

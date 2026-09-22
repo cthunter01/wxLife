@@ -16,7 +16,7 @@ namespace wxLife::core
 {
 
 BandedStepper::BandedStepper(unsigned maxThreads, CellCount minCellsPerBand) noexcept
-  : maxThreads_(maxThreads), minCellsPerBand_(minCellsPerBand)
+  : m_maxThreads(maxThreads), m_minCellsPerBand(minCellsPerBand)
 {
 }
 
@@ -26,16 +26,16 @@ CellCount BandedStepper::step(const Grid& src, Grid& dst, const Rule& rule, Topo
     assert(dst.extent() == src.extent());
     const Extent   extent = src.extent();
     const auto     width  = static_cast<std::size_t>(extent.width);
-    const unsigned bands  = suggestedBandCount(extent.cellCount(), maxThreads_, minCellsPerBand_);
+    const unsigned bands  = suggestedBandCount(extent.cellCount(), m_maxThreads, m_minCellsPerBand);
 
     // Size the scratch here, so the band jobs never allocate. Each band owns one slot of each of
     // the two vectors.
-    columnSums_.resize(bands);
-    for (std::vector<std::uint8_t>& sums : columnSums_)
+    m_columnSums.resize(bands);
+    for (std::vector<std::uint8_t>& sums : m_columnSums)
     {
         sums.resize(width + 2);
     }
-    bandPopulation_.assign(bands, 0);
+    m_bandPopulation.assign(bands, 0);
 
     const Rule::KernelMasks masks = rule.kernelMasks();
     forEachBand(extent.height, bands, [&](unsigned band, Coord firstRow, Coord endRow) {
@@ -44,11 +44,11 @@ CellCount BandedStepper::step(const Grid& src, Grid& dst, const Rule& rule, Topo
         {
             population += kernel::stepRow(src.paddedRow(y - 1).data(), src.paddedRow(y).data(),
                                           src.paddedRow(y + 1).data(), dst.row(y).data(),
-                                          columnSums_[band].data(), width, masks);
+                                          m_columnSums[band].data(), width, masks);
         }
-        bandPopulation_[band] = population;
+        m_bandPopulation[band] = population;
     });
-    return std::reduce(bandPopulation_.begin(), bandPopulation_.end(), CellCount{0});
+    return std::reduce(m_bandPopulation.begin(), m_bandPopulation.end(), CellCount{0});
 }
 
 }  // namespace wxLife::core

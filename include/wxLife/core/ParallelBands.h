@@ -1,5 +1,5 @@
 /// @file
-/// Runs a job over horizontal row bands on short-lived std::jthreads.
+/// Runs a job over horizontal row bands on short-lived std::threads.
 #pragma once
 
 #include <algorithm>
@@ -29,7 +29,7 @@ inline constexpr CellCount kMinCellsPerBand = 125'000;  ///< Work worth one band
 
 /// Calls job(band, firstRow, endRow) for `bands` contiguous half-open row ranges [firstRow, endRow)
 /// covering [0, rows); `bands` is clamped to [1, max(rows, 1)]. Band 0 runs on the calling thread
-/// and the others on std::jthreads; returns when all have finished. A band whose thread cannot be
+/// and the others on std::threads; returns when all have finished. A band whose thread cannot be
 /// started (std::system_error, std::bad_alloc) runs on the calling thread.
 /// @pre `job` does not throw, and different bands never write the same memory.
 template <std::invocable<unsigned, Coord, Coord> Job>
@@ -41,7 +41,10 @@ void forEachBand(Coord rows, unsigned bands, Job job)
         job(band, bandStart(rows, bands, band), bandStart(rows, bands, band + 1));
     };
 
-    std::vector<std::jthread> helpers;  // joined by their destructors when this function returns
+    // std::thread, joined below, rather than std::jthread: Apple's libc++ has no jthread before
+    // LLVM 20. Nothing between the first start and the joins can throw (every job is noexcept by
+    // the precondition, and a failed start is caught), so no joinable thread is ever destroyed.
+    std::vector<std::thread> helpers;
     helpers.reserve(bands - 1);
     for (unsigned band = 1; band < bands; ++band)
     {
@@ -55,6 +58,10 @@ void forEachBand(Coord rows, unsigned bands, Job job)
         }
     }
     runBand(0);
+    for (std::thread& helper : helpers)
+    {
+        helper.join();
+    }
 }
 
 }  // namespace wxLife::core

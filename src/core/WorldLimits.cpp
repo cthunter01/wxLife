@@ -11,7 +11,16 @@
 #include "wxLife/core/Format.h"
 #include "wxLife/core/Types.h"
 
-#if __has_include(<unistd.h>)
+// The physical memory size is the one OS query in core.
+#ifdef _WIN32
+#ifndef NOMINMAX
+#define NOMINMAX  // NOLINT(cppcoreguidelines-macro-usage): <windows.h> reads it
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN  // NOLINT(cppcoreguidelines-macro-usage): <windows.h> reads it
+#endif
+#include <windows.h>
+#elif defined(__APPLE__) || defined(__linux__)
 #include <unistd.h>
 #endif
 
@@ -26,7 +35,14 @@ constexpr std::uint64_t kGiB = std::uint64_t{1} << 30;
 
 std::optional<std::uint64_t> physicalMemoryBytes() noexcept
 {
-#if defined(_SC_PHYS_PAGES) && defined(_SC_PAGESIZE)
+#ifdef _WIN32
+    MEMORYSTATUSEX status{};
+    status.dwLength = static_cast<DWORD>(sizeof(status));
+    if (GlobalMemoryStatusEx(&status) != 0)
+    {
+        return std::uint64_t{status.ullTotalPhys};
+    }
+#elif defined(__APPLE__) || defined(__linux__)
     const long pages    = sysconf(_SC_PHYS_PAGES);
     const long pageSize = sysconf(_SC_PAGESIZE);
     if (pages > 0 && pageSize > 0)
@@ -34,7 +50,7 @@ std::optional<std::uint64_t> physicalMemoryBytes() noexcept
         return static_cast<std::uint64_t>(pages) * static_cast<std::uint64_t>(pageSize);
     }
 #endif
-    return std::nullopt;
+    return std::nullopt;  // another OS, or the query failed
 }
 
 std::uint64_t defaultMemoryBudget() noexcept

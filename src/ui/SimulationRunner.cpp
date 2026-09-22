@@ -14,33 +14,33 @@ namespace wxLife::ui
 {
 
 SimulationRunner::SimulationRunner(core::World& world, TickHandler onTick)
-  : world_(world), onTick_(std::move(onTick))
+  : m_world(world), m_onTick(std::move(onTick))
 {
-    timer_.Bind(wxEVT_TIMER, [this](wxTimerEvent&) { onTimer(); });
+    m_timer.Bind(wxEVT_TIMER, [this](wxTimerEvent&) { onTimer(); });
 }
 
 void SimulationRunner::start()
 {
-    if (running_)
+    if (m_running)
     {
         return;
     }
     const auto now = core::Clock::now();
-    pacer_.restart(now);
-    meter_.reset();
-    running_ = true;
-    timer_.StartOnce(static_cast<int>(kTickInterval.count()));
+    m_pacer.restart(now);
+    m_meter.reset();
+    m_running = true;
+    m_timer.StartOnce(static_cast<int>(kTickInterval.count()));
 }
 
 void SimulationRunner::stop()
 {
-    running_ = false;
-    timer_.Stop();
+    m_running = false;
+    m_timer.Stop();
 }
 
 void SimulationRunner::toggle()
 {
-    if (running_)
+    if (m_running)
     {
         stop();
     }
@@ -52,53 +52,53 @@ void SimulationRunner::toggle()
 
 bool SimulationRunner::isRunning() const noexcept
 {
-    return running_;
+    return m_running;
 }
 
 void SimulationRunner::stepOnce()
 {
     stop();
-    world_.step();
-    if (onTick_)
+    m_world.step();
+    if (m_onTick)
     {
-        onTick_({.generationsStepped = 1, .measuredRate = meter_.perSecond()});
+        m_onTick({.generationsStepped = 1, .measuredRate = m_meter.perSecond()});
     }
 }
 
 void SimulationRunner::setSpeed(core::Speed speed)
 {
-    pacer_.setSpeed(speed);
+    m_pacer.setSpeed(speed);
 }
 
 core::Speed SimulationRunner::speed() const noexcept
 {
-    return pacer_.speed();
+    return m_pacer.speed();
 }
 
 std::optional<double> SimulationRunner::measuredRate() const noexcept
 {
-    return meter_.perSecond();
+    return m_meter.perSecond();
 }
 
 void SimulationRunner::onTimer()
 {
     const auto           start = core::Clock::now();
-    const core::TickPlan plan  = pacer_.plan(start);
+    const core::TickPlan plan  = m_pacer.plan(start);
     std::int64_t         done  = 0;
     // At least one step per due tick, even when a single step takes longer than the budget.
     while (done < plan.maxGenerations &&
            (done == 0 || core::Clock::now() - start < plan.timeBudget))
     {
-        world_.step();
+        m_world.step();
         ++done;
     }
-    pacer_.commit(done);
-    meter_.record(done, core::Clock::now());
-    if (done > 0 && onTick_)
+    m_pacer.commit(done);
+    m_meter.record(done, core::Clock::now());
+    if (done > 0 && m_onTick)
     {
-        onTick_({.generationsStepped = done, .measuredRate = meter_.perSecond()});
+        m_onTick({.generationsStepped = done, .measuredRate = m_meter.perSecond()});
     }
-    if (running_)  // the handler may have stopped us
+    if (m_running)  // the handler may have stopped us
     {
         scheduleNext(core::Clock::now() - start);
     }
@@ -112,7 +112,7 @@ void SimulationRunner::scheduleNext(core::Clock::duration tickCost)
     using namespace std::chrono;
     const milliseconds delay =
         std::max(kMinIdleGap, kTickInterval - duration_cast<milliseconds>(tickCost));
-    timer_.StartOnce(static_cast<int>(delay.count()));
+    m_timer.StartOnce(static_cast<int>(delay.count()));
 }
 
 }  // namespace wxLife::ui

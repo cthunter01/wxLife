@@ -70,23 +70,23 @@ private:
     void addRuleGroup(wxSizer& column);
 
     // Child controls, owned by wx.
-    wxButton*     runPause_{};
-    wxChoice*     automaton_{};  ///< core::kAutomata names, in that order
-    wxSpinCtrl*   density_{};    ///< 1..100 %
-    wxSpinCtrl*   antCount_{};   ///< 1..core::kMaxAnts
-    wxButton*     resetAnts_{};
-    wxSlider*     speedSlider_{};  ///< 0..Speed::kSliderMax (log scale)
-    wxSpinCtrl*   speedSpin_{};    ///< Speed::kMin..kMax
-    wxCheckBox*   maxSpeed_{};
-    wxSlider*     cellSizeSlider_{};  ///< Index into render::kZoomSteps
-    wxSpinCtrl*   cellSizeSpin_{};    ///< 1..100 px
-    wxCheckBox*   showGrid_{};
-    wxStaticText* worldInfo_{};
-    wxCheckBox*   wrap_{};
-    wxStaticBox*  ruleBox_{};     ///< Disabling it greys out the whole Rule group at once
-    wxChoice*     rulePreset_{};  ///< kRulePresets names, then "Custom"
-    wxTextCtrl*   ruleText_{};    ///< wxTE_PROCESS_ENTER
-    wxStaticText* ruleError_{};
+    wxButton*     m_runPause{};
+    wxChoice*     m_automaton{};  ///< core::kAutomata names, in that order
+    wxSpinCtrl*   m_density{};    ///< 1..100 %
+    wxSpinCtrl*   m_antCount{};   ///< 1..core::kMaxAnts
+    wxButton*     m_resetAnts{};
+    wxSlider*     m_speedSlider{};  ///< 0..Speed::kSliderMax (log scale)
+    wxSpinCtrl*   m_speedSpin{};    ///< Speed::kMin..kMax
+    wxCheckBox*   m_maxSpeed{};
+    wxSlider*     m_cellSizeSlider{};  ///< Index into render::kZoomSteps
+    wxSpinCtrl*   m_cellSizeSpin{};    ///< 1..100 px
+    wxCheckBox*   m_showGrid{};
+    wxStaticText* m_worldInfo{};
+    wxCheckBox*   m_wrap{};
+    wxStaticBox*  m_ruleBox{};     ///< Disabling it greys out the whole Rule group at once
+    wxChoice*     m_rulePreset{};  ///< kRulePresets names, then "Custom"
+    wxTextCtrl*   m_ruleText{};    ///< wxTE_PROCESS_ENTER
+    wxStaticText* m_ruleError{};
 };
 
 }  // namespace wxLife::ui

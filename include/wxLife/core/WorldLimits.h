@@ -29,7 +29,8 @@ enum class ExtentError : std::uint8_t
            (static_cast<std::uint64_t>(e.height) + 2U) * sizeof(Cell);
 }
 
-/// Installed RAM from sysconf() on Unix; nullopt elsewhere or when it cannot be read.
+/// Installed RAM: sysconf() on Linux and macOS, GlobalMemoryStatusEx() on Windows. nullopt on other
+/// systems or when it cannot be read.
 [[nodiscard]] std::optional<std::uint64_t> physicalMemoryBytes() noexcept;
 /// A quarter of physical RAM clamped to [256 MiB, 16 GiB]; 2 GiB when RAM is unknown.
 [[nodiscard]] std::uint64_t defaultMemoryBudget() noexcept;

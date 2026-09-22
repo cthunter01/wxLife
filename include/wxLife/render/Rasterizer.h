@@ -27,12 +27,12 @@ private:
     // Scratch rows rebuilt once per frame; kept as members so painting does not allocate.
     // A stamp is one cell's pixel run (cellSize × 3 bytes); the major ones end in a major grid-line
     // pixel. A grid row is a horizontal grid-line pixel row.
-    std::vector<std::uint8_t> aliveStamp_;
-    std::vector<std::uint8_t> deadStamp_;
-    std::vector<std::uint8_t> aliveStampMajor_;
-    std::vector<std::uint8_t> deadStampMajor_;
-    std::vector<std::uint8_t> gridRow_;
-    std::vector<std::uint8_t> gridRowMajor_;
+    std::vector<std::uint8_t> m_aliveStamp;
+    std::vector<std::uint8_t> m_deadStamp;
+    std::vector<std::uint8_t> m_aliveStampMajor;
+    std::vector<std::uint8_t> m_deadStampMajor;
+    std::vector<std::uint8_t> m_gridRow;
+    std::vector<std::uint8_t> m_gridRowMajor;
 };
 
 /// Paints each ant's cell body in style.ant over a frame Rasterizer::render() has just drawn,

@@ -1,3 +1,5 @@
+#include "wxLife/core/ParallelBands.h"
+
 #include <algorithm>
 #include <cstddef>
 #include <format>
@@ -8,7 +10,6 @@
 
 #include <gtest/gtest.h>
 
-#include "wxLife/core/ParallelBands.h"
 #include "wxLife/core/Types.h"
 
 namespace wxLife::core

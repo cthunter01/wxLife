@@ -26,8 +26,9 @@ inline constexpr std::array kZoomSteps{1,  2,  3,  4,  5,  6,  8,  10, 12,
         return d < 0 ? -d : d;
     };
     // min_element returns the first of equal entries, and the table is sorted, so the smaller wins.
-    const auto* const nearest = std::ranges::min_element(kZoomSteps, {}, distance);
-    return static_cast<std::size_t>(std::ranges::distance(kZoomSteps.begin(), nearest));
+    // (An index, as in findPreset(): std::array's iterator is a class in MSVC's library.)
+    return static_cast<std::size_t>(std::ranges::distance(
+        kZoomSteps.begin(), std::ranges::min_element(kZoomSteps, {}, distance)));
 }
 
 /// The camera: maps canvas device pixels to world cells and back.
@@ -95,11 +96,11 @@ private:
 
     void clampOffset() noexcept;
 
-    core::Extent                          world_{};
-    PixelSize                             canvas_{};
-    int                                   cellSize_ = 4;
-    PixelPoint                            offset_{};
-    std::array<std::optional<ZoomRun>, 2> zoomRuns_;  ///< x and y
+    core::Extent                          m_world{};
+    PixelSize                             m_canvas{};
+    int                                   m_cellSize = 4;
+    PixelPoint                            m_offset{};
+    std::array<std::optional<ZoomRun>, 2> m_zoomRuns;  ///< x and y
 };
 
 }  // namespace wxLife::render

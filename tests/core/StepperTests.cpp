@@ -1,3 +1,5 @@
+#include "wxLife/core/Stepper.h"
+
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -17,7 +19,6 @@
 #include "wxLife/core/Random.h"
 #include "wxLife/core/ReferenceStepper.h"
 #include "wxLife/core/Rule.h"
-#include "wxLife/core/Stepper.h"
 #include "wxLife/core/Types.h"
 
 namespace wxLife::core
@@ -172,7 +173,7 @@ protected:
     {
         for (int g = 0; g < generations; ++g)
         {
-            stepInPlace(*stepper_, grid, Rule{}, topology);
+            stepInPlace(*m_stepper, grid, Rule{}, topology);
         }
         return grid;
     }
@@ -191,7 +192,7 @@ protected:
     }
 
 private:
-    std::unique_ptr<Stepper> stepper_ = makeStepper(GetParam());
+    std::unique_ptr<Stepper> m_stepper = makeStepper(GetParam());
 };
 
 TEST_P(StepperPatternTest, StillLifesStayStill)

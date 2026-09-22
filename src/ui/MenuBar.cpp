@@ -14,48 +14,48 @@ wxMenuBar* buildMenuBar()
     file->Append(wxID_EXIT, "&Quit\tCtrl+Q");
 
     auto* automaton = new wxMenu;
-    automaton->AppendRadioItem(ID_AUTOMATON_LIFE, "&Life");
-    automaton->AppendRadioItem(ID_AUTOMATON_ANT, "Langton's &Ant");
+    automaton->AppendRadioItem(AutomatonLifeID, "&Life");
+    automaton->AppendRadioItem(AutomatonAntID, "Langton's &Ant");
 
     auto* engine = new wxMenu;
-    engine->AppendRadioItem(ID_ENGINE_BANDED, "&Banded");
-    engine->AppendRadioItem(ID_ENGINE_REFERENCE, "&Reference");
+    engine->AppendRadioItem(EngineBandedID, "&Banded");
+    engine->AppendRadioItem(EngineReferenceID, "&Reference");
 
     auto* simulation = new wxMenu;
     // MainFrame::syncControls() switches this label to "Pause" while the simulation runs.
-    simulation->Append(ID_RUN_PAUSE, "&Run\tF5");
-    simulation->Append(ID_STEP, "&Step\tF6");
+    simulation->Append(RunPauseID, "&Run\tF5");
+    simulation->Append(StepID, "&Step\tF6");
     simulation->AppendSeparator();
-    simulation->Append(ID_FASTER, "&Faster\tCtrl+]");
-    simulation->Append(ID_SLOWER, "S&lower\tCtrl+[");
-    simulation->AppendCheckItem(ID_TOGGLE_MAX_SPEED, "&Max Speed\tCtrl+M");
+    simulation->Append(FasterID, "&Faster\tCtrl+]");
+    simulation->Append(SlowerID, "S&lower\tCtrl+[");
+    simulation->AppendCheckItem(ToggleMaxSpeedID, "&Max Speed\tCtrl+M");
     simulation->AppendSeparator();
     // The automaton decides whether the engine below it matters at all, so it comes first.
     simulation->AppendSubMenu(automaton, "&Automaton");
     simulation->AppendSubMenu(engine, "&Engine");
 
     auto* edit = new wxMenu;
-    edit->Append(ID_CLEAR, "&Clear\tCtrl+Delete");
-    edit->Append(ID_RANDOMIZE, "&Randomize\tCtrl+R");
+    edit->Append(ClearID, "&Clear\tCtrl+Delete");
+    edit->Append(RandomizeID, "&Randomize\tCtrl+R");
     // No accelerator: every free Ctrl key is a GTK binding.
-    edit->Append(ID_RESET_ANTS, "Reset &Ants");
+    edit->Append(ResetAntsID, "Reset &Ants");
     edit->AppendSeparator();
-    edit->Append(ID_FOCUS_RULE, toWx("Edit R&ule…\tCtrl+L"));
+    edit->Append(FocusRuleID, toWx("Edit R&ule…\tCtrl+L"));
 
     auto* world = new wxMenu;
-    world->Append(ID_WORLD_SIZE, toWx("&Size…\tCtrl+N"));
-    world->AppendCheckItem(ID_TOGGLE_WRAP, "&Wrap Edges\tCtrl+T");
+    world->Append(WorldSizeID, toWx("&Size…\tCtrl+N"));
+    world->AppendCheckItem(ToggleWrapID, "&Wrap Edges\tCtrl+T");
 
     auto* view = new wxMenu;
-    view->Append(ID_ZOOM_IN, "Zoom &In\tCtrl+=");
-    view->Append(ID_ZOOM_OUT, "Zoom &Out\tCtrl+-");
-    view->Append(ID_ZOOM_FIT, "&Fit World\tCtrl+0");
-    view->Append(ID_CENTER_VIEW, "&Center World\tCtrl+Home");
+    view->Append(ZoomInID, "Zoom &In\tCtrl+=");
+    view->Append(ZoomOutID, "Zoom &Out\tCtrl+-");
+    view->Append(ZoomFitID, "&Fit World\tCtrl+0");
+    view->Append(CenterViewID, "&Center World\tCtrl+Home");
     view->AppendSeparator();
-    view->AppendCheckItem(ID_TOGGLE_GRID, "&Grid Lines\tCtrl+G");
+    view->AppendCheckItem(ToggleGridID, "&Grid Lines\tCtrl+G");
 
     auto* help = new wxMenu;
-    help->Append(ID_SHOW_CONTROLS_HELP, toWx("&Keyboard and Mouse…\tF1"));
+    help->Append(ShowControlsHelpID, toWx("&Keyboard and Mouse…\tF1"));
     help->Append(wxID_ABOUT, "&About wxLife");
 
     auto* bar = new wxMenuBar;

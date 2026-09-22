@@ -80,13 +80,13 @@ private:
     /// Without `force`, at most once per defaults::kStatusRefresh.
     void updateStatusBar(bool force);
 
-    core::World&                 world_;
-    SimulationRunner             runner_;
-    std::uint64_t                memoryBudget_ = core::defaultMemoryBudget();
-    WorldCanvas*                 canvas_{};  ///< Owned by wx.
-    ControlPanel*                panel_{};   ///< Owned by wx.
-    std::optional<core::CellPos> hovered_;
-    core::Clock::time_point      lastStatusUpdate_;
+    core::World&                 m_world;
+    SimulationRunner             m_runner;
+    std::uint64_t                m_memoryBudget = core::defaultMemoryBudget();
+    WorldCanvas*                 m_canvas{};  ///< Owned by wx.
+    ControlPanel*                m_panel{};   ///< Owned by wx.
+    std::optional<core::CellPos> m_hovered;
+    core::Clock::time_point      m_lastStatusUpdate;
 };
 
 }  // namespace wxLife::ui
