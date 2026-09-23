@@ -97,14 +97,19 @@ std::string rows(std::initializer_list<std::string_view> lines)
     return text;
 }
 
-Viewport viewportFor(const Grid& grid, PixelSize canvas, int cellSize, PixelPoint offset = {})
+Viewport viewportFor(const Grid& grid, PixelSize canvas, Scale scale, PixelPoint offset = {})
 {
     Viewport viewport;
     viewport.setWorldExtent(grid.extent());
     viewport.setCanvasSize(canvas);
-    viewport.setCellSize(cellSize, {});
+    viewport.setScale(scale, {});
     viewport.scrollTo(offset);
     return viewport;
+}
+
+Viewport viewportFor(const Grid& grid, PixelSize canvas, int cellSize, PixelPoint offset = {})
+{
+    return viewportFor(grid, canvas, Scale{.cellSize = cellSize}, offset);
 }
 
 PixelBuffer render(const Grid& grid, const Viewport& viewport, const RenderStyle& style,
@@ -117,18 +122,55 @@ PixelBuffer render(const Grid& grid, const Viewport& viewport, const RenderStyle
 }
 
 // The colour of one canvas pixel, worked out from the definitions alone: the obviously correct,
+// referencePixel() below 1 px: the pixel shows a block of cells, and is an ant if one stands in it,
+// else alive if any of its cells is.
+Rgb referenceBlockPixel(const Grid& grid, const Viewport& viewport, const RenderStyle& style,
+                        Pixel x, Pixel y, std::span<const core::Ant> ants)
+{
+    const Extent       world = grid.extent();
+    const std::int64_t side  = viewport.scale().cellsPerPixel();
+    const std::int64_t left  = (viewport.offset().x + x) * side;
+    const std::int64_t top   = (viewport.offset().y + y) * side;
+    if (left < 0 || top < 0 || left >= world.width || top >= world.height)
+    {
+        return style.outside;
+    }
+    const auto inBlock = [&](CellPos cell) {
+        return cell.x >= left && cell.x < left + side && cell.y >= top && cell.y < top + side;
+    };
+    if (std::ranges::any_of(ants, [&](const core::Ant& ant) { return inBlock(ant.position); }))
+    {
+        return style.ant;
+    }
+    for (std::int64_t cy = top; cy < std::min<std::int64_t>(top + side, world.height); ++cy)
+    {
+        for (std::int64_t cx = left; cx < std::min<std::int64_t>(left + side, world.width); ++cx)
+        {
+            if (grid.at({.x = static_cast<Coord>(cx), .y = static_cast<Coord>(cy)}) == core::kAlive)
+            {
+                return style.alive;
+            }
+        }
+    }
+    return style.dead;
+}
+
 // slow version of Rasterizer. A grid line is the last pixel column or row of a cell; where lines
 // cross, a major line wins. An ant colours the body of the cell it stands on, but never a grid
 // line.
 Rgb referencePixel(const Grid& grid, const Viewport& viewport, const RenderStyle& style, Pixel x,
                    Pixel y, std::span<const core::Ant> ants = {})
 {
-    const int          size     = viewport.cellSize();
+    if (viewport.scale().zoomedOut())
+    {
+        return referenceBlockPixel(grid, viewport, style, x, y, ants);
+    }
+    const Extent       world    = grid.extent();
+    const int          size     = viewport.scale().cellSize;
     const Pixel        contentX = viewport.offset().x + x;
     const Pixel        contentY = viewport.offset().y + y;
     const std::int64_t cellX    = core::floorDiv(contentX, size);
     const std::int64_t cellY    = core::floorDiv(contentY, size);
-    const Extent       world    = grid.extent();
     if (cellX < 0 || cellY < 0 || cellX >= world.width || cellY >= world.height)
     {
         return style.outside;
@@ -193,15 +235,15 @@ std::int64_t pick(core::SplitMix64& rng, std::int64_t lo, std::int64_t hi)
     return lo + static_cast<std::int64_t>(rng() % static_cast<std::uint64_t>(hi - lo + 1));
 }
 
-// Each cell is alive with probability 2/5.
-Grid randomGrid(core::SplitMix64& rng, Extent extent)
+// Each cell is alive with probability perMille / 1000.
+Grid randomGrid(core::SplitMix64& rng, Extent extent, std::uint64_t perMille = 400)
 {
     Grid grid(extent);
     for (Coord y = 0; y < extent.height; ++y)
     {
         for (Coord x = 0; x < extent.width; ++x)
         {
-            grid.set({.x = x, .y = y}, rng() % 5 < 2 ? core::kAlive : core::kDead);
+            grid.set({.x = x, .y = y}, rng() % 1000 < perMille ? core::kAlive : core::kDead);
         }
     }
     return grid;
@@ -216,17 +258,26 @@ struct Scene
     std::string            description;
 };
 
-// Any cell size, grid policy and scroll position, including centred axes and cells cut by the
-// canvas edge.
+// Any scale, grid policy and scroll position, including centred axes and cells cut by the
+// canvas edge. Worlds zoomed out below 1 px are larger, and often sparse, so their blocks differ.
 Scene randomScene(core::SplitMix64& rng)
 {
+    const bool         zoomOut = pick(rng, 0, 3) == 0;
     const std::int64_t maxSide =
-        pick(rng, 0, 9) == 0 ? 400 : 40;  // now and then a world to scroll far in
+        zoomOut || pick(rng, 0, 9) == 0 ? 400 : 40;  // now and then a world to scroll far in
     const Extent    world{.width  = static_cast<Coord>(pick(rng, 0, maxSide)),
                           .height = static_cast<Coord>(pick(rng, 0, maxSide))};
     const PixelSize canvas{.width = pick(rng, 0, 140), .height = pick(rng, 0, 100)};
     const int       cellSize =
         static_cast<int>(pick(rng, 0, 2) == 0 ? pick(rng, 1, 6) : pick(rng, 1, 100));
+    const Scale scale = zoomOut ? Scale{.shrink = static_cast<unsigned>(pick(rng, 1, 5))}
+                                : Scale{.cellSize = cellSize};
+    // Content pixels of the world at that scale, for scroll positions near its ends.
+    const auto content = [&scale](Coord side) {
+        return scale.zoomedOut() ? (Pixel{side} + scale.cellsPerPixel() - 1) / scale.cellsPerPixel()
+                                 : Pixel{side} * scale.cellSize;
+    };
+    const std::uint64_t perMille = pick(rng, 0, 1) == 0 ? 400 : 5;
 
     RenderStyle style = pick(rng, 0, 1) == 0 ? darkStyle() : lightStyle();
     style.showGrid    = pick(rng, 0, 3) != 0;
@@ -247,21 +298,20 @@ Scene randomScene(core::SplitMix64& rng)
         }
     }
 
-    Scene scene{.grid        = randomGrid(rng, world),
+    Scene scene{.grid        = randomGrid(rng, world, perMille),
                 .viewport    = {},
                 .style       = style,
                 .ants        = ants,
                 .description = {}};
-    scene.viewport    = viewportFor(scene.grid, canvas, cellSize,
-                                    {.x = pick(rng, -20, (Pixel{world.width} * cellSize) + 20),
-                                     .y = pick(rng, -20, (Pixel{world.height} * cellSize) + 20)});
+    scene.viewport    = viewportFor(scene.grid, canvas, scale,
+                                    {.x = pick(rng, -20, content(world.width) + 20),
+                                     .y = pick(rng, -20, content(world.height) + 20)});
     scene.description = std::format(
-        "world {}x{}, canvas {}x{}, cell {} px, offset ({}, {}), grid {} from {} px, major every "
-        "{}, "
-        "{} ants",
-        world.width, world.height, canvas.width, canvas.height, cellSize, scene.viewport.offset().x,
-        scene.viewport.offset().y, style.showGrid ? "on" : "off", style.minCellSizeForGrid,
-        style.majorGridEvery, ants.size());
+        "world {}x{} ({} per mille), canvas {}x{}, cell {}, offset ({}, {}), grid {} from {} px, "
+        "major every {}, {} ants",
+        world.width, world.height, perMille, canvas.width, canvas.height,
+        toString(scene.viewport.scale()), scene.viewport.offset().x, scene.viewport.offset().y,
+        style.showGrid ? "on" : "off", style.minCellSizeForGrid, style.majorGridEvery, ants.size());
     return scene;
 }
 
@@ -384,6 +434,35 @@ TEST(RasterizerTest, OnePixelCellsMapOneToOne)
         "#######",
     });
     EXPECT_EQ(art(render(small, viewportFor(small, {7, 4}, 1), style), style), centred);
+}
+
+TEST(RasterizerTest, BelowOnePixelEachPixelShowsABlockOfCells)
+{
+    // A pixel shows 2^shrink × 2^shrink cells and is alive if any of them is; the blocks at the
+    // right and bottom edges are cut short by the world.
+    const RenderStyle style = darkStyle();
+    const Grid        grid  = gridFromAscii({
+        "O........",
+        ".........",
+        "...O.....",
+        "......OO.",
+        "........O",
+    });
+    const PixelSize   canvas{.width = 4, .height = 2};
+    EXPECT_EQ(art(render(grid, viewportFor(grid, canvas, Scale{.shrink = 1}), style), style),
+              rows({"O...", ".O.O"}));
+    EXPECT_EQ(
+        art(render(grid, viewportFor(grid, canvas, Scale{.shrink = 1}, {.x = 1, .y = 1}), style),
+            style),
+        rows({"O.O.", "...O"}));
+
+    // Four cells a pixel: the world is 3 × 2 pixels, centred across. An ant shows in its block.
+    const std::vector<core::Ant> ants{
+        {.position = {.x = 1, .y = 1}, .heading = core::Heading::NORTH}};
+    EXPECT_EQ(art(render(grid, viewportFor(grid, canvas, Scale{.shrink = 2}), style, ants), style),
+              rows({"AO.#", "..O#"}));
+    // Zooming out ends there, with the whole world in view.
+    EXPECT_EQ(viewportFor(grid, canvas, Scale{.shrink = 5}).scale().shrink, 2U);
 }
 
 TEST(RasterizerTest, GridLinesNeedFivePixelCells)
@@ -653,6 +732,45 @@ TEST(RasterizerTest, EveryCellSizeMatchesThePixelReference)
     }
 }
 
+TEST(RasterizerTest, EveryShrinkMatchesThePixelReference)
+{
+    // A world large enough that, zoomed out, its blocks are read on several threads; sparse and
+    // dense, from 1/2 px until the whole world is in view, at the start, the far end and between.
+    core::SplitMix64  rng(11);
+    const RenderStyle style = darkStyle();
+    const PixelSize   canvas{.width = 100, .height = 80};
+    Rasterizer        rasterizer;
+    PixelBuffer       frame;
+    for (const std::uint64_t perMille : {std::uint64_t{2}, std::uint64_t{400}})
+    {
+        const Grid grid = randomGrid(rng, {.width = 1200, .height = 900}, perMille);
+        const std::vector<core::Ant> ants{
+            {.position = {.x = 1199, .y = 899}, .heading = core::Heading::NORTH},
+            {.position = {.x = 700, .y = 300}, .heading = core::Heading::WEST}};
+        for (unsigned shrink = 1; shrink <= 4; ++shrink)
+        {
+            for (const PixelPoint offset :
+                 {PixelPoint{.x = 0, .y = 0}, PixelPoint{.x = 37, .y = 11},
+                  PixelPoint{.x = Pixel{1} << 20, .y = Pixel{1} << 20}})
+            {
+                const Viewport viewport =
+                    viewportFor(grid, canvas, Scale{.shrink = shrink}, offset);
+                ASSERT_EQ(viewport.scale().shrink, shrink);
+                rasterizer.render(grid, viewport, style, frame);
+                drawAnts(ants, viewport, style, frame);
+                ASSERT_EQ(firstDifference(frame, grid, viewport, style, ants), "")
+                    << perMille << " per mille, " << toString(viewport.scale()) << ", offset ("
+                    << viewport.offset().x << ", " << viewport.offset().y << ")";
+            }
+        }
+    }
+    // One more would still fit the world into view, so it is the limit.
+    EXPECT_EQ(viewportFor(Grid({.width = 1200, .height = 900}), canvas, Scale{.shrink = 9})
+                  .scale()
+                  .shrink,
+              4U);
+}
+
 TEST(RasterizerTest, RandomScenesMatchThePixelReference)
 {
     // One rasterizer and one frame for every scene, as in WorldCanvas, so stale buffers would show.
@@ -671,41 +789,53 @@ TEST(RasterizerTest, RandomScenesMatchThePixelReference)
 
 TEST(RasterizerTest, APlaneLooksLikeAGridWithTheSameCells)
 {
-    // A plane draws its visible cells through a small grid of their own. With the grid's cell
-    // (100, 100) at the plane's (0, 0), both must give the same pixels, grid lines included,
-    // wherever the view is, at every cell size.
+    // A plane draws its visible cells, or blocks, through a small grid of their own. With the
+    // grid's cell (320, 320) at the plane's (0, 0), which keeps the blocks and the major grid
+    // lines aligned alike, both must give the same pixels, grid lines included, wherever the view
+    // is, at every scale.
     core::SplitMix64               rng(99);
-    Grid                           grid({.width = 200, .height = 200});
+    constexpr Coord                kSide   = 640;
+    constexpr Coord                kCentre = kSide / 2;
+    Grid                           grid({.width = kSide, .height = kSide});
     core::HashLife                 plane(core::Rule{}, std::uint64_t{1} << 26);
     std::vector<core::UniversePos> cells;
-    for (Coord y = 0; y < 200; ++y)
+    for (Coord y = 0; y < kSide; ++y)
     {
-        for (Coord x = 0; x < 200; ++x)
+        for (Coord x = 0; x < kSide; ++x)
         {
-            if (rng() % 3 == 0)
+            if (rng() % 30 == 0)
             {
                 grid.set({.x = x, .y = y}, core::kAlive);
-                cells.push_back({.x = x - 100, .y = y - 100});
+                cells.push_back({.x = x - kCentre, .y = y - kCentre});
             }
         }
     }
     plane.setCells(cells, core::kAlive);
     const RenderStyle style = darkStyle();
-    for (const int size : {1, 2, 3, 5, 7, 10, 16})
+    const PixelSize   canvas{.width = 60, .height = 50};
+    for (const Scale scale :
+         {Scale{.shrink = 3}, Scale{.shrink = 2}, Scale{.shrink = 1}, Scale{.cellSize = 1},
+          Scale{.cellSize = 2}, Scale{.cellSize = 3}, Scale{.cellSize = 5}, Scale{.cellSize = 7},
+          Scale{.cellSize = 10}, Scale{.cellSize = 16}})
     {
+        const auto pixels = [&scale](Coord cellCount) {
+            return scale.zoomedOut() ? Pixel{cellCount} / scale.cellsPerPixel()
+                                     : Pixel{cellCount} * scale.cellSize;
+        };
         for (int trial = 0; trial < 5; ++trial)
         {
-            const PixelSize  canvas{.width = 90, .height = 70};
             const PixelPoint offset{
-                .x = static_cast<Pixel>(rng() % static_cast<std::uint64_t>((200 * size) - 90)),
-                .y = static_cast<Pixel>(rng() % static_cast<std::uint64_t>((200 * size) - 70))};
-            const Viewport fixed = viewportFor(grid, canvas, size, offset);
+                .x = static_cast<Pixel>(rng() %
+                                        static_cast<std::uint64_t>(pixels(kSide) - canvas.width)),
+                .y = static_cast<Pixel>(rng() %
+                                        static_cast<std::uint64_t>(pixels(kSide) - canvas.height))};
+            const Viewport fixed = viewportFor(grid, canvas, scale, offset);
             Viewport       unbounded;
             unbounded.setUnbounded();
             unbounded.setCanvasSize(canvas);
-            unbounded.setCellSize(size, {});
-            unbounded.scrollTo(
-                {.x = offset.x - (Pixel{100} * size), .y = offset.y - (Pixel{100} * size)});
+            unbounded.setScale(scale, {});
+            unbounded.scrollTo({.x = offset.x - pixels(kCentre), .y = offset.y - pixels(kCentre)});
+            ASSERT_EQ(fixed.scale(), scale);
             ASSERT_EQ(fixed.offset().x, offset.x);  // inside the grid, so nothing was clamped
 
             PixelBuffer fromPlane;
@@ -714,7 +844,7 @@ TEST(RasterizerTest, APlaneLooksLikeAGridWithTheSameCells)
             const PixelBuffer fromGrid = render(grid, fixed, style);
             ASSERT_EQ(fromPlane.size(), fromGrid.size());
             EXPECT_TRUE(std::ranges::equal(fromPlane.bytes(), fromGrid.bytes()))
-                << "cell size " << size << ", offset " << offset.x << ", " << offset.y;
+                << toString(scale) << ", offset " << offset.x << ", " << offset.y;
         }
     }
 }

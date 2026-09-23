@@ -35,7 +35,7 @@ enum CommandId : int  // NOLINT(cppcoreguidelines-use-enum-class,performance-enu
     ID_ZOOM_OUT,
     ID_ZOOM_FIT,
     ID_CENTER_VIEW,
-    ID_CELL_SIZE_CHANGED,  ///< Read ControlPanel::cellSize().
+    ID_CELL_SIZE_CHANGED,  ///< Read ControlPanel::scale().
     ID_TOGGLE_GRID,
     ID_WORLD_SIZE,
     ID_TOGGLE_WRAP,

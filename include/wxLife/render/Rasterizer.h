@@ -15,8 +15,10 @@
 namespace wxLife::render
 {
 
-/// Draws the part of a Grid visible through a Viewport. Cost is O(canvas pixels), independent of
-/// world size.
+/// Draws the part of a world visible through a Viewport. From 1 px per cell on, the cost is
+/// O(canvas pixels), independent of world size. Below 1 px, each pixel shows a block of cells and
+/// is alive if any of them is; a grid then costs a read of every visible cell (on several threads),
+/// a plane one visit per lit pixel.
 class Rasterizer
 {
 public:
@@ -24,19 +26,23 @@ public:
     /// @pre viewport.worldExtent() == grid.extent()
     void render(const core::Grid& grid, const Viewport& viewport, const RenderStyle& style,
                 PixelBuffer& out);
-    /// The same for an unbounded plane. The cells the view shows are gathered into a grid of
-    /// their own first (forEachBlock() skips the empty ones), so from there on the drawing is the
-    /// same as for a fixed-size world. @pre viewport.unbounded()
+    /// The same for an unbounded plane. The cells (or blocks) the view shows are gathered into a
+    /// grid of their own first (forEachBlock() skips the empty ones), so from there on the drawing
+    /// is the same as for a fixed-size world. @pre viewport.unbounded()
     void render(const core::HashLife& plane, const Viewport& viewport, const RenderStyle& style,
                 PixelBuffer& out);
 
 private:
+    /// m_window becomes an all-dead grid the size of `cells`.
+    void resetWindow(core::UniverseRect cells);
     /// Paints `grid`, whose cell (0, 0) is world cell `origin`, as `viewport` shows the world.
     /// @pre the grid holds every cell the viewport shows
     void paint(const core::Grid& grid, core::UniversePos origin, const Viewport& viewport,
                const RenderStyle& style, PixelBuffer& out);
 
-    core::Grid m_window;  ///< The visible part of a plane; reused while the canvas keeps its size
+    /// The visible part of a plane, or below 1 px the visible blocks; reused while its size stays.
+    core::Grid                           m_window;
+    std::vector<std::vector<core::Cell>> m_bandRows;  ///< shrinkGrid()'s scratch rows
     // Scratch rows rebuilt once per frame; kept as members so painting does not allocate.
     // A stamp is one cell's pixel run (cellSize × 3 bytes); the major ones end in a major grid-line
     // pixel. A grid row is a horizontal grid-line pixel row.

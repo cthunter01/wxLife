@@ -124,6 +124,10 @@ struct CellRect
 /// top-left cell.
 using UniverseCoord = std::int64_t;
 
+/// The cells of an unbounded plane lie in [-kUniverseRadius, kUniverseRadius) on each axis, so a
+/// view of one never needs to go further.
+inline constexpr UniverseCoord kUniverseRadius = UniverseCoord{1} << 61;
+
 /// A cell position with 64-bit coordinates, for any kind of world.
 struct UniversePos
 {

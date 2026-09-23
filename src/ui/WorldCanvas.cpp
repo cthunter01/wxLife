@@ -95,14 +95,19 @@ WorldCanvas::WorldCanvas(wxWindow* parent, const core::World& world, Callbacks c
     Bind(wxEVT_SYS_COLOUR_CHANGED, &WorldCanvas::onThemeChanged, this);
 }
 
-int WorldCanvas::cellSize() const noexcept
+render::Scale WorldCanvas::scale() const noexcept
 {
-    return m_viewport.cellSize();
+    return m_viewport.scale();
 }
 
-void WorldCanvas::setCellSize(int px)
+unsigned WorldCanvas::maxShrink() const noexcept
 {
-    m_viewport.setCellSize(px, canvasCentre());
+    return m_viewport.maxShrink();
+}
+
+void WorldCanvas::setScale(render::Scale scale)
+{
+    m_viewport.setScale(scale, canvasCentre());
     cameraMoved();
 }
 
@@ -197,11 +202,17 @@ core::UniverseRect WorldCanvas::visibleCells() const noexcept
 core::Extent WorldCanvas::cellsThatFit() const noexcept
 {
     const render::PixelSize canvas = m_viewport.canvasSize();
-    const render::Pixel     cell   = m_viewport.cellSize();
+    const render::Scale     scale  = m_viewport.scale();
 
-    const auto cellsAlong = [cell](render::Pixel length) {
+    const auto cellsAlong = [scale](render::Pixel length) {
+        // Both factors are capped at the largest side first, so the product cannot overflow.
+        const render::Pixel cells =
+            scale.zoomedOut()
+                ? std::min<render::Pixel>(length, core::kMaxWorldSide) *
+                      std::min<render::Pixel>(scale.cellsPerPixel(), core::kMaxWorldSide)
+                : length / scale.cellSize;
         return static_cast<core::Coord>(
-            std::clamp<render::Pixel>(length / cell, core::kMinWorldSide, core::kMaxWorldSide));
+            std::clamp<render::Pixel>(cells, core::kMinWorldSide, core::kMaxWorldSide));
     };
     return {.width = cellsAlong(canvas.width), .height = cellsAlong(canvas.height)};
 }
@@ -296,7 +307,10 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
         const int button = event.GetButton();
 
         m_dragButton = button;
-        if (button == wxMOUSE_BTN_MIDDLE || (button == wxMOUSE_BTN_LEFT && event.ShiftDown()))
+        // Below 1 px a pixel is a block of cells, so no button draws or places an ant there:
+        // every drag pans.
+        if (button == wxMOUSE_BTN_MIDDLE || (button == wxMOUSE_BTN_LEFT && event.ShiftDown()) ||
+            m_viewport.scale().zoomedOut())
         {
             m_drag         = Drag::PAN;
             m_lastPanPoint = point;
@@ -352,10 +366,10 @@ void WorldCanvas::onWheel(wxMouseEvent& event)
     {
         // wxGTK: a positive rotation means up on the vertical axis but right on the horizontal one.
         const int    direction = horizontalAxis ? 1 : -1;
-        const double pixels =
-            notches * kWheelPanLines * std::max(m_viewport.cellSize(), kMinWheelLinePx) * direction;
-        const bool horizontal = horizontalAxis || event.ShiftDown();
-        double&    pending    = horizontal ? m_wheelPanX : m_wheelPanY;
+        const double pixels    = notches * kWheelPanLines *
+                                 std::max(m_viewport.scale().cellSize, kMinWheelLinePx) * direction;
+        const bool   horizontal = horizontalAxis || event.ShiftDown();
+        double&      pending    = horizontal ? m_wheelPanX : m_wheelPanY;
 
         pending += pixels;
         const auto whole = static_cast<render::Pixel>(pending);
@@ -403,7 +417,7 @@ void WorldCanvas::onScroll(wxScrollWinEvent& event)
         m_viewport.scrollTo(horizontal ? render::PixelPoint{.x = position, .y = offset.y}
                                        : render::PixelPoint{.x = offset.x, .y = position});
     };
-    const render::Pixel line = std::max(m_viewport.cellSize(), kMinScrollbarLinePx);
+    const render::Pixel line = std::max(m_viewport.scale().cellSize, kMinScrollbarLinePx);
     const render::Pixel page = percentOf(along(m_viewport.canvasSize()), kPagePanPercent);
 
     // Scroll event types are not constant expressions, so no switch.
@@ -588,6 +602,10 @@ void WorldCanvas::beginPaint(core::UniversePos cell, core::Cell value)
 
 void WorldCanvas::continuePaint(render::PixelPoint devicePoint)
 {
+    if (m_viewport.scale().zoomedOut())
+    {
+        return;  // zoomed below 1 px during the stroke: it waits until the cells are pixels again
+    }
     const core::UniversePos target = m_viewport.cellAtClamped(devicePoint);
     if (!m_lastStrokeCell)  // the camera moved (see viewportChanged())
     {

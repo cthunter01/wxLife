@@ -66,7 +66,7 @@ Every other place that shows one of these values is only a view of it.
 |---|---|
 | World kind, cells (a grid or a HashLife plane), automaton, ants, rule, topology, engine, generation, population | `core::World`, held by `app::LifeApp` |
 | Running flag, speed, step size, pacing, measured rate, the step running in the background | `ui::SimulationRunner`, a member of `MainFrame` |
-| Cell size, scroll offset, grid-line flag, colours | `ui::WorldCanvas`, through `render::Viewport` and `render::RenderStyle` (colours from `wxLife/ui/Theme.h`) |
+| Scale (cell size, or cells per pixel below 1 px), scroll offset, grid-line flag, colours | `ui::WorldCanvas`, through `render::Viewport` and `render::RenderStyle` (colours from `wxLife/ui/Theme.h`) |
 | Random-fill density, rule text being edited, preset selection | The `ui::ControlPanel` widgets |
 | Memory budget | `MainFrame`, computed once with `core::defaultMemoryBudget()` |
 | The demo chosen last, the folder File → Open looked in last | `MainFrame` (`m_lastDemo`, `m_lastPatternDir`) |
@@ -302,17 +302,21 @@ cancel flag and joins the worker; a cancelled step changes nothing. Running then
 tick. The panel's memory line (`memoryBytes()`) is refreshed only between steps, because the node count
 belongs to the worker while a step runs.
 
-**The view.** `Viewport::setUnbounded()` removes the edges: the offset may go `kUnboundedReach` (2^55)
-content pixels either way from (0, 0), which keeps every product in the zoom arithmetic within 64 bits
-and still spans 3.6 × 10^16 cells at 1 px. `cellAt()`, `cellAtClamped()`, `cellOrigin()` and
-`visibleCells()` use `UniversePos` and `UniverseRect`. Fit shows the plane's bounding box (an empty
-plane is centred on (0, 0)), and Center World centres it. The scrollbars stay visible, so the canvas
-keeps its size, but they do nothing on a plane.
+**The view.** `Viewport::setUnbounded()` removes the edges but the universe's: the offset may go
+`kUnboundedReach` (2^55) content pixels either way from (0, 0), which keeps every product in the zoom
+arithmetic within 64 bits and still spans 3.6 × 10^16 cells at 1 px. Below 1 px the reach is also
+capped at the universe, `core::kUniverseRadius` (2^61) cells either way, so zooming out ends with the
+whole universe in view, centred like a small fixed-size world, with nothing beyond it. `cellAt()`,
+`cellAtClamped()`, `cellOrigin()` and `visibleCells()` use `UniversePos` and `UniverseRect`. Fit shows
+the plane's bounding box (an empty plane is centred on (0, 0)), and Center World centres it. The
+scrollbars stay visible, so the canvas keeps its size, but they do nothing on a plane.
 
 **Rendering.** `Rasterizer::render(const HashLife&, …)` copies the visible cells into a window `Grid`
 (`m_window`, kept between frames) with `forEachBlock()`, then paints that grid with the same stamps and
-row copies as a fixed-size world, with the window's corner as its origin. The cost is the canvas plus
-the live cells in view; empty space is skipped by the quadtree.
+row copies as a fixed-size world, with the window's corner as its origin. Below 1 px it asks
+`forEachBlock()` for blocks of 2^shrink cells, which are aligned exactly as the pixels are, so the
+window holds one entry per pixel. The cost is the canvas plus one visit per lit pixel; empty space is
+skipped by the quadtree, at any scale.
 
 ## Patterns and demos (`core`, `DemoDialog`)
 
@@ -377,16 +381,26 @@ pixel types and `Rgb`, as `wxLife/core/Types.h` does for cells.
   and column. Drawing is not affected.
 
 **`Viewport`** is the camera, and the only source of truth for zoom and scroll position.
-- **Offset.** `offset()` is the content pixel shown at the canvas's top-left corner. On an axis where
-  the world is smaller than the canvas, `clampOffset()` centres the world, so the offset can be
-  negative. Conversions between pixels and cells therefore use `floorDiv()`.
-- **Anchored zoom.** `setCellSize()` keeps the world point under the centre of the anchor pixel inside
+- **Scale.** `render::Scale` is either a cell size of 1 to 100 px, or below 1 px a `shrink`: one pixel
+  for each block of 2^shrink × 2^shrink cells. Powers of two keep the blocks aligned with HashLife's
+  quadtree, and every conversion exact.
+- **Offset.** `offset()` is the content pixel shown at the canvas's top-left corner: content pixel p
+  shows cell ⌊p / size⌋, or below 1 px the block starting at cell p × 2^shrink. On an axis where the
+  world is smaller than the canvas, `clampOffset()` centres the world, so the offset can be negative.
+  Conversions between pixels and cells therefore use `floorDiv()`.
+- **Anchored zoom.** `setScale()` keeps the world point under the centre of the anchor pixel inside
   that pixel (at most half a pixel off), so the cell under the anchor stays, unless clamping moves the
-  view. It uses only integers. On each axis, zooms at the same anchor, with nothing else moving the
-  camera in between, form a run that keeps the point of its first zoom (`m_zoomRuns`). Rounding errors
-  therefore never add up, and going back to a size restores its offset. Clamping an axis, which includes
-  centring a world smaller than the canvas, ends that axis's run only.
-- **Zoom steps.** `zoomBy()` moves along `kZoomSteps`.
+  view. It uses only integers: the point is a cell plus a fraction (2 × (p mod size) + 1) / (2 × size)
+  of one, and below 1 px, where a pixel is an even number of cells wide, the corner between two cells.
+  On each axis, zooms at the same anchor, with nothing else moving the camera in between, form a run
+  that keeps the point of its first zoom (`m_zoomRuns`). Rounding errors therefore never add up, and
+  going back to a scale restores its offset. Clamping an axis, which includes centring a world smaller
+  than the canvas, ends that axis's run only.
+- **Zoom steps.** `zoomBy()` moves along a ladder: the shrink levels from `maxShrink()` up to 1, then
+  the `kZoomSteps` entries. `maxShrink()` is the first shrink at which the whole world, for a plane
+  the whole universe, fits the canvas, so zooming out ends with everything in view; a world that fits
+  at 1 px never goes below it. A view left beyond the limit by a growing canvas may zoom in, never
+  further out.
 
 **`Rasterizer::render()`** fills a `PixelBuffer` the size of the canvas. Its cost depends only on the
 number of canvas pixels, never on the size of the world.
@@ -399,6 +413,15 @@ number of canvas pixels, never on the size of the world.
 
 Grid lines use the last pixel column and row of each cell, and they appear only from 5 px. A crossing
 uses the major colour when either of the two lines is major.
+
+**Below 1 px** a pixel shows a block of cells and is alive when any of them is, as in Golly: a lone
+glider stays visible, and dense areas look solid. `shrinkGrid()` makes a grid of blocks, one per
+visible pixel, which `paint()` then draws as 1 px cells, so the pixel path is the same. For each row of
+blocks it ORs the block's cell rows together (vectorised byte ORs), then ORs each block's run of that
+row; the rows of blocks are split into bands on `forEachBand()`'s threads. Unlike the other paths its
+cost grows with the visible cells, but it is bound by memory bandwidth. Measured with a 25% random
+world on a 1080p canvas: all of 10000² (1/16 px) takes 2.6 ms per frame, and all of 20000² (1/32 px)
+7.4 ms, less than one generation of stepping it.
 
 The rasterizer is compiled with `-O3` in every build type. Its times, in ms per frame, for a 25% random
 10000² world with grid lines on:
@@ -477,7 +500,7 @@ Ctrl+left click → WorldCanvas::onMouse → m_callbacks.toggleAnt(cell) → Mai
 
 Ctrl+wheel → WorldCanvas::onWheel → Viewport::zoomBy(steps, pointer) → cameraMoved()
   → viewportChanged() → syncScrollbars(), Refresh(false), m_callbacks.viewChanged
-  → MainFrame::onViewChanged → m_panel->setCellSize(), updateStatusBar(true)
+  → MainFrame::onViewChanged → m_panel->setScale(scale, maxShrink), updateStatusBar(true)
 
 G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
   → the same MainFrame::onToggleGrid as the menu item and the check box
@@ -495,6 +518,9 @@ G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
 - When the camera moves during a stroke (fit, centre, zoom, wheel, arrow keys, scrollbars),
   `viewportChanged()` forgets the previous cell. The next motion then paints only the cell under the
   pointer and goes on from there, so no line crosses cells the pointer never touched.
+- Below 1 px per cell a pixel is a block of cells, so every press there starts a pan instead, and a
+  stroke already under way (the wheel zoomed out during it) paints nothing until the view is back at
+  1 px or more.
 - The canvas captures the mouse for the whole drag. Only the release of the button that started the drag
   (`m_dragButton`) ends it.
 - The capture is released in one place, `endDrag()`, which also handles capture loss, Esc and
@@ -640,7 +666,10 @@ checks whether that step has finished (see Unbounded worlds above).
 - **`RasterizerTest`** compares every pixel with a small independent reference: every cell size from 1
   to 100, and 1500 random scenes, each with up to three ants. The reference gains one branch for them —
   an ant colours the body of its cell but never a grid line — so the overlay, its clipping and both
-  paint paths are covered by the same oracle. Hand-drawn text-art frames cover the special cases.
+  paint paths are covered by the same oracle. Below 1 px the reference looks at every cell of a
+  pixel's block; a quarter of the random scenes are zoomed out, sparse or dense, and
+  `EveryShrinkMatchesThePixelReference` draws a world large enough to be read on several threads.
+  Hand-drawn text-art frames cover the special cases, such as blocks cut short by the world's edge.
 - **`HashLifeTest`** compares HashLife cell for cell with the dense engine on random soups under seven
   rules, including Seeds and Replicator, which grow at the speed of light, after single and 2^j steps.
   It also checks the textbook facts an unbounded plane gives: the R-pentomino's 116 cells at 1103, the
@@ -650,8 +679,9 @@ checks whether that step has finished (see Unbounded worlds above).
   collection to its owner, and three threads drawing the plane while a step runs.
 - **`WorldTest`** also covers the unbounded kind: a grid becoming a plane and back with its pattern and
   generation, rules and edits on a plane, randomizing an area, and far cells that must not wrap into a
-  grid. **`ViewportTest`** checks the unbounded view and its reach, and **`RasterizerTest`** checks that
-  a plane looks pixel for pixel like a grid with the same cells, at cell sizes from 1 to 16 px.
+  grid. **`ViewportTest`** checks the unbounded view, its reach and zooming out to the whole universe,
+  and **`RasterizerTest`** checks that a plane looks pixel for pixel like a grid with the same cells,
+  at scales from 1/8 to 16 px.
 - **`PatternTest`** reads RLE and plaintext text, including the tolerances real files need (CRLF, runs
   split by white space and line ends, a missing `!`, every rule spelling), and every error with its line.
   **`PatternSetupTest`** covers the demo and file setups, including the margins shrinking to the budget.
@@ -659,7 +689,8 @@ checks whether that step has finished (see Unbounded worlds above).
   first primes of the Primer and the ant demos. **`ThumbnailTest`** compares previews with text art.
 - **`ViewportTest`** checks anchored zoom for every pair of zoom steps and every anchor position inside
   a cell against a floating-point reference, checks that zooming there and back restores the offset,
-  and compares `cellAt` and `visibleCells` with brute-force results.
+  below 1 px and across it too, and compares `cellAt` and `visibleCells` with brute-force results, below
+  1 px pixel by pixel against the blocks they show.
 - **Other suites.** The rest of `core` (worlds, rules, grids, lines, bands, random numbers, limits,
   speed, pacing and the rate meter, formatting) has its own suites. `tests/support/AsciiGrid.h` lets
   tests write patterns as text, such as `".O."`.
@@ -671,7 +702,8 @@ checks whether that step has finished (see Unbounded worlds above).
   They are skipped when no display is configured, and they fail when a configured display cannot be
   opened. `RunsUnboundedWorlds` turns the world into a plane in the size dialog, opens a glider into
   it, steps it 2^10 and runs it at 2^20 generations a step, draws, randomizes, is refused a B0 rule,
-  and goes back to a fixed size.
+  and goes back to a fixed size. `ZoomsOutBelowOnePixel` fits a world larger than the canvas, checks
+  the panel and the status bar, pans with a drag, and zooms a plane out to the whole universe.
 - **Checks outside GoogleTest.** CTest also runs `layering` and `static_link` (`ldd`, `otool -L` or
   `dumpbin /dependents` must list no wxWidgets library for `wxLife`). Configuring already fails if `wx::core` or `wx::base` is not the static library
   built from the fetched sources.
@@ -697,7 +729,7 @@ checks whether that step has finished (see Unbounded worlds above).
 | Other topologies (cylinder, Klein bottle) | `Topology` and `kTopologies`. `-Wswitch` lists the `core` code that needs a case: `toString(Topology)`, `Grid::updateBorder()` and the `alive` lambda in `ReferenceStepper::step()`. | Add an enum value, a `kTopologies` entry and a copy rule; `StepperTest` and `WorldTest` then cover it. The Wrap Edges toggle in `MainFrame` would become a choice. |
 | Macrocell files, giant demos | Unbounded worlds; `readPattern()`; `PatternSetup::kind` | A macrocell reader that builds HashLife nodes directly, and demos with `kind = UNBOUNDED`. That brings the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and lets the prime calculators run without their streams hitting an edge. |
 | A third kind of world, or HashLife for more automata | `WorldKind`, the `kind()` branches in `World`, `WorldCanvas` and `MainFrame` | With a third kind it is time to extract an interface from `World` with one implementation per kind, rather than more branches. |
-| Zooming out below 1 px, a minimap | `Viewport` (`int` cell size) and `Rasterizer` | Replace the cell size with a scale type, and add a downsampling path. |
+| A minimap | `Viewport` and `Rasterizer` draw any part of any world at any scale, down to all of it (`maxShrink()`) | A second small canvas with its own `Viewport` at `maxShrink()`, drawing the main view's `visibleCells()` as a frame over it, and turning clicks into `centerOn()`. |
 | More demos | `patterns/`, `demo_patterns` in `src/CMakeLists.txt`, `kDemos` in `src/core/Demo.cpp` | Add the file, list it, and add a `Demo`; `DemoTest` checks the rest. `patterns/README.md` has the steps. |
 | Saving patterns, more file formats | `readPattern()`, `MainFrame::openPatternFile()` | An RLE writer next to the reader and File → Save. Life 1.06 would be a third reader behind the same format check. |
 | Undo/redo, selection | Every edit enters through a `CommandId` or through `paintCells` → `MainFrame::onPaintCells()` | Let `World::setCells()` report the changed cells, and add an undo stack in `ui/`. |

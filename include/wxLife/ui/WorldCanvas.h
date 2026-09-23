@@ -42,11 +42,12 @@ public:
     /// `world` is owned by LifeApp and outlives this window.
     WorldCanvas(wxWindow* parent, const core::World& world, Callbacks callbacks);
 
-    /// Device pixels.
-    [[nodiscard]] int cellSize() const noexcept;
+    [[nodiscard]] render::Scale scale() const noexcept;
+    /// As render::Viewport::maxShrink(): zooming out stops once the whole world fits.
+    [[nodiscard]] unsigned maxShrink() const noexcept;
     /// Anchored at the canvas centre.
-    void setCellSize(int px);
-    /// Along render::kZoomSteps, anchored at the canvas centre.
+    void setScale(render::Scale scale);
+    /// Along the zoom ladder (render::Viewport::zoomBy()), anchored at the canvas centre.
     void zoomBy(int steps);
     /// Fits the world into the canvas and keeps it fitted through canvas size changes until the
     /// user zooms or scrolls. An unbounded world fits its pattern as it is now; an empty one is
@@ -64,7 +65,7 @@ public:
     void worldExtentChanged();
     /// The cells the canvas shows.
     [[nodiscard]] core::UniverseRect visibleCells() const noexcept;
-    /// World size that fills the canvas at the current cell size.
+    /// World size that fills the canvas at the current scale.
     [[nodiscard]] core::Extent cellsThatFit() const noexcept;
     /// Ends any drag and releases the mouse capture.
     void cancelStroke();

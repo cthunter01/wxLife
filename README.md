@@ -43,8 +43,11 @@ world runs smoothly at every zoom level, and a 10000 × 10000 world stays usable
     Banded engine against.
 - Speed from 1 to 1000 generations per second, or Max. The status bar shows the target and, once it has
   been measured, the rate actually achieved.
-- Zoom from 1 to 100 screen pixels per cell, anchored at the mouse pointer. Grid lines appear from 5 px,
-  with a stronger line every 10 cells.
+- Zoom from 100 screen pixels per cell down to 1 px, and below: at 1/2, 1/4, 1/8 px… each pixel shows a
+  block of cells and lights up if any of them is alive, so even a lone glider stays visible. Zooming is
+  anchored at the mouse pointer, and zooming out stops once the whole world is in view (for an
+  unbounded plane, the whole universe). Grid lines appear from 5 px, with a stronger line every 10
+  cells.
 - Drawing with the mouse, with no gaps even when the mouse moves fast. Panning, scrollbars and keyboard
   shortcuts.
 - One cell can be one physical pixel on HiDPI screens. The colours follow the desktop's light or dark
@@ -204,7 +207,10 @@ Ctrl+Delete (in a number box, Ctrl+Home sets the smallest value).
 | Wheel | Scroll up and down |
 | Shift + wheel, or a horizontal wheel or touchpad swipe | Scroll left and right |
 | Ctrl + wheel | Zoom one step per notch, keeping the cell under the pointer in place |
-| Hover | The status bar shows the cell's coordinates |
+| Hover | The status bar shows the cell's coordinates (below 1 px, the first cell of the pixel's block) |
+
+Below 1 px per cell a pixel shows many cells, so no drag draws or erases there, and no click places an
+ant: every drag pans instead. A stroke in progress waits while the view is zoomed out that far.
 
 Each wheel notch scrolls 3 cells, but at least 48 pixels. Pressing outside the world starts no stroke.
 Only the button that started a drag ends it. If the view moves during a stroke (a key, the wheel or a
@@ -310,8 +316,9 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
     A plane runs only Life, and only rules without B0 (a birth on 0 neighbours would fill the whole
     plane at once): the dialog refuses Unbounded while Langton's ant runs or the rule has B0, and says
     why, and the rule box refuses a B0 rule while a plane runs.
-  - On a plane, Randomize fills what the view shows, Fit shows the whole pattern, and the scrollbars do
-    nothing; pan with the mouse or the keys. The view can go 2^55 pixels from the centre.
+  - On a plane, Randomize fills what the view shows (at most its middle 4096 × 4096 cells), Fit shows
+    the whole pattern, and the scrollbars do nothing; pan with the mouse or the keys. From 1 px up,
+    the view can go 2^55 pixels from the centre; zoomed out, it reaches the edge of the universe.
 - **Demo patterns.** Loading a demo replaces the world, pauses at generation 0 and sets the world size,
   edges, rule, speed and automaton the demo was tuned for. Every setting was chosen by running the
   demo: gliders from the guns vanish cleanly at the dead edges, and the methuselahs evolve exactly as
@@ -355,13 +362,21 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
     measured (`30 gen/s (29.9)` or `Max (… gen/s)`). A measurement takes at least half a second and two
     generations.
 - **Cell size.** The cell size is 1 to 100 *device* pixels, so at 1 px one cell is one physical pixel
-  even on a HiDPI screen.
+  even on a HiDPI screen, or below 1 px, 1/2^k px: one pixel for a block of 2^k × 2^k cells.
   - wx reports the mouse position in whole logical pixels. At a display scale of 2, cells smaller than
     2 px can therefore be clicked only in every second row and column. Zoom in to edit single cells.
   - The zoom commands and the slider step through 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 25, 32, 40, 50,
-    64, 80 and 100. The box accepts any size in between.
-  - Fit (also run after every resize) picks the largest size that shows the whole world. The world then
-    stays fitted as the window changes size, until you zoom or scroll.
+    64, 80 and 100, and below 1 px through 1/2, 1/4, 1/8 and so on. The box accepts any size from 1 to
+    100 in between; below 1 px the panel shows the scale as text (`1/16 px`) in its place, as the
+    status bar does.
+  - Zooming out stops at the first scale that shows the whole world: a world that fits at 1 px does not
+    go below it. An unbounded plane goes on until its whole universe, 2^62 cells across, is in view.
+  - Below 1 px a pixel is alive if any cell of its block is, so dense areas look solid. Drawing a large
+    grid there reads every visible cell, on several threads: a whole 20000² world takes about 7 ms per
+    frame on the development machine.
+  - Fit (also run after every resize) picks the largest scale that shows the whole world, below 1 px if
+    need be. The world then stays fitted as the window changes size, until you zoom or scroll. Demos in
+    worlds larger than the window therefore open zoomed out, showing the whole world.
 
 ## Troubleshooting
 
@@ -407,6 +422,9 @@ the GUI smoke tests do not run at all, the whole list is the only check of the i
       cells paint both cells (wxGTK reports the second click as a double click).
 - [ ] Ctrl + wheel zooms at the pointer, all the way from 1 px to 100 px and back. Smooth-scrolling
       touchpads scroll and zoom without jumps.
+- [ ] Resize to 10000² and Randomize: Fit zooms out below 1 px to show it all, the panel shows `1/16 px`
+      (or similar) instead of the size box, and a left drag pans without drawing. Zooming out further
+      does nothing; zooming in brings the size box back at 1 px.
 - [ ] Dragging a scrollbar thumb scrolls the view. The scrollbar arrows and the page areas work too.
 - [ ] Resize to 1 × 1, 10000² and 20000², keeping the pattern. The pattern stays centred.
 - [ ] Max speed on a 10000² world: the window still repaints and responds to input.
@@ -436,6 +454,6 @@ the GUI smoke tests do not run at all, the whole list is the only check of the i
 - [ ] World → Size…, Unbounded, keeping the pattern: the pattern stays, the panel shows the memory in
       use, and Wrap Edges, the Engine submenu and the automaton choice are greyed out.
 - [ ] On the plane, open the Gosper glider gun, set the step to 2^10 with F8 or `}`, and run at Max:
-      the stream of gliders grows by 1024 generations a step, and Fit centres the view on it.
+      the stream of gliders grows by 1024 generations a step, and Fit shows all of it, zoomed out.
 - [ ] Set the step to 2^30 on a busy pattern: the status bar says "Computing…", and the window still
       pans, zooms and repaints. Pause, draw or Clear during the step: it stops at once.

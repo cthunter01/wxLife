@@ -48,14 +48,26 @@ std::string text(core::UniverseRect r)
     return r.empty() ? "empty" : std::format("[{}, {}) x [{}, {})", r.x0, r.x1, r.y0, r.y1);
 }
 
-Viewport makeViewport(Extent world, PixelSize canvas, int cellSize, PixelPoint offset = {})
+Viewport makeViewport(Extent world, PixelSize canvas, Scale scale, PixelPoint offset = {})
 {
     Viewport viewport;
     viewport.setWorldExtent(world);
     viewport.setCanvasSize(canvas);
-    viewport.setCellSize(cellSize, {});
+    viewport.setScale(scale, {});
     viewport.scrollTo(offset);
     return viewport;
+}
+
+Viewport makeViewport(Extent world, PixelSize canvas, int cellSize, PixelPoint offset = {})
+{
+    return makeViewport(world, canvas, Scale{.cellSize = cellSize}, offset);
+}
+
+// Pixels per cell side as a number: 4, or 1/16 below 1 px.
+double pixelsPerCell(Scale scale)
+{
+    return scale.zoomedOut() ? 1.0 / static_cast<double>(scale.cellsPerPixel())
+                             : static_cast<double>(scale.cellSize);
 }
 
 // Uniform in [lo, hi]; the modulo bias does not matter here.
@@ -87,7 +99,7 @@ struct WorldPoint
 WorldPoint worldAt(const Viewport& viewport, PixelPoint p)
 {
     const auto axis = [&](Pixel offset, Pixel canvas) {
-        return (static_cast<double>(offset + canvas) + 0.5) / viewport.cellSize();
+        return (static_cast<double>(offset + canvas) + 0.5) / pixelsPerCell(viewport.scale());
     };
     return {.x = axis(viewport.offset().x, p.x), .y = axis(viewport.offset().y, p.y)};
 }
@@ -95,7 +107,8 @@ WorldPoint worldAt(const Viewport& viewport, PixelPoint p)
 // `point` lies inside canvas pixel `p` (edges included): at most half a pixel from its centre.
 void expectInsidePixel(const Viewport& viewport, PixelPoint p, WorldPoint point)
 {
-    const double     halfPixel = (0.5 / viewport.cellSize()) + 1e-9;  // 1e-9 absorbs rounding
+    // 1e-9 absorbs rounding.
+    const double     halfPixel = (0.5 / pixelsPerCell(viewport.scale())) + 1e-9;
     const WorldPoint centre    = worldAt(viewport, p);
     EXPECT_NEAR(centre.x, point.x, halfPixel);
     EXPECT_NEAR(centre.y, point.y, halfPixel);
@@ -125,10 +138,41 @@ Span bruteForceVisible(Pixel offset, Pixel canvas, Coord side, int cellSize)
     return first ? Span{.first = *first, .end = end} : Span{};
 }
 
+// Below 1 px: the cells whose pixel, floor(c / perPixel) - offset, lies in [0, canvas), found by
+// trying every cell.
+Span bruteForceVisibleBlocks(Pixel offset, Pixel canvas, Coord side, std::int64_t perPixel)
+{
+    std::optional<Coord> first;
+    Coord                end = 0;
+    for (Coord c = 0; c < side; ++c)
+    {
+        const Pixel pixel = core::floorDiv(c, perPixel) - offset;
+        if (pixel >= 0 && pixel < canvas)
+        {
+            first = first.value_or(c);
+            end   = c + 1;
+        }
+    }
+    return Span{.first = first.value_or(0), .end = end};
+}
+
+// Below 1 px: the first cell that content pixel `content` shows, found by trying every cell.
+std::optional<Coord> bruteForceFirstCell(Pixel content, Coord side, std::int64_t perPixel)
+{
+    for (Coord c = 0; c < side; ++c)
+    {
+        if (core::floorDiv(c, perPixel) == content)
+        {
+            return c;
+        }
+    }
+    return std::nullopt;
+}
+
 // The cell whose pixel square contains the canvas point, found by trying every cell.
 std::optional<core::UniversePos> bruteForceCellAt(const Viewport& viewport, PixelPoint p)
 {
-    const int  size = viewport.cellSize();
+    const int  size = viewport.scale().cellSize;
     const auto axis = [size](Pixel offset, Pixel point, Coord side) -> std::optional<Coord> {
         for (Coord c = 0; c < side; ++c)
         {
@@ -150,7 +194,7 @@ TEST(ViewportTest, StartsEmpty)
     const Viewport viewport;
     EXPECT_EQ(viewport.worldExtent(), (Extent{}));
     EXPECT_EQ(viewport.canvasSize(), (PixelSize{}));
-    EXPECT_EQ(viewport.cellSize(), 4);
+    EXPECT_EQ(viewport.scale().cellSize, 4);
     EXPECT_EQ(text(viewport.offset()), "(0, 0)");
     EXPECT_EQ(text(viewport.visibleCells()), "empty");
 }
@@ -177,13 +221,13 @@ TEST(ViewportTest, CellSizeIsClamped)
 {
     Viewport viewport = makeViewport({.width = 10, .height = 10}, {.width = 100, .height = 100}, 4);
     viewport.setCellSize(0, {});
-    EXPECT_EQ(viewport.cellSize(), kMinCellSize);
+    EXPECT_EQ(viewport.scale().cellSize, kMinCellSize);
     viewport.setCellSize(101, {});
-    EXPECT_EQ(viewport.cellSize(), kMaxCellSize);
+    EXPECT_EQ(viewport.scale().cellSize, kMaxCellSize);
     viewport.setCellSize(std::numeric_limits<int>::min(), {});
-    EXPECT_EQ(viewport.cellSize(), kMinCellSize);
+    EXPECT_EQ(viewport.scale().cellSize, kMinCellSize);
     viewport.setCellSize(37, {});  // any size in range is kept exactly
-    EXPECT_EQ(viewport.cellSize(), 37);
+    EXPECT_EQ(viewport.scale().cellSize, 37);
 }
 
 TEST(ViewportTest, AnchoredZoomKeepsThePointUnderTheAnchor)
@@ -218,7 +262,7 @@ TEST(ViewportTest, AnchoredZoomKeepsThePointUnderTheAnchor)
                 ASSERT_LT(viewport.offset().x, content.width - canvas.width);
                 ASSERT_LT(viewport.offset().y, content.height - canvas.height);
 
-                EXPECT_EQ(viewport.cellSize(), to);
+                EXPECT_EQ(viewport.scale().cellSize, to);
                 EXPECT_EQ(text(viewport.cellAt(anchor)), text(cell));
                 expectInsidePixel(viewport, anchor, point);
             }
@@ -234,7 +278,7 @@ TEST(ViewportTest, AnchoredZoomAlsoHoldsLeftOfTheWorld)
                                              {.width = 640, .height = 480}, 4, {.x = 99, .y = 0});
     const PixelPoint anchor{.x = -500, .y = 0};
     const auto       cellUnderAnchor = [&] {
-        return core::floorDiv(viewport.offset().x + anchor.x, viewport.cellSize());
+        return core::floorDiv(viewport.offset().x + anchor.x, viewport.scale().cellSize);
     };
     ASSERT_EQ(cellUnderAnchor(), -101);
     viewport.setCellSize(1, anchor);
@@ -244,14 +288,16 @@ TEST(ViewportTest, AnchoredZoomAlsoHoldsLeftOfTheWorld)
 
 TEST(ViewportTest, RepeatedZoomingDoesNotDrift)
 {
-    // Every zoom of a run keeps the run's first point, and each size always gets the same offset.
+    // Every zoom of a run keeps the run's first point, and each scale always gets the same offset,
+    // below 1 px too. Zoomed out until an axis is centred, the run ends and a new one starts.
     core::SplitMix64 rng(7);
-    Viewport         viewport =
-        makeViewport({.width = 100'000, .height = 100'000}, {.width = 800, .height = 600}, 8);
+    const PixelSize  canvas{.width = 400, .height = 300};
+    Viewport         viewport = makeViewport({.width = 100'000, .height = 100'000}, canvas, 8);
     viewport.centerOn({.x = 31'415, .y = 27'182});
-    const PixelPoint          anchor{.x = 313, .y = 207};
-    const WorldPoint          point = worldAt(viewport, anchor);
-    std::map<int, PixelPoint> offsets{{viewport.cellSize(), viewport.offset()}};
+    const PixelPoint            anchor{.x = 313, .y = 207};
+    WorldPoint                  point = worldAt(viewport, anchor);
+    std::map<Scale, PixelPoint> offsets{{viewport.scale(), viewport.offset()}};
+    int                         restarts = 0;
     for (int i = 0; i < 2000; ++i)
     {
         if (i % 2 == 0)
@@ -262,13 +308,23 @@ TEST(ViewportTest, RepeatedZoomingDoesNotDrift)
         {
             viewport.setCellSize(static_cast<int>(pick(rng, kMinCellSize, kMaxCellSize)), anchor);
         }
-        SCOPED_TRACE(std::format("after {} zooms, at {} px", i + 1, viewport.cellSize()));
+        SCOPED_TRACE(std::format("after {} zooms, at {}", i + 1, toString(viewport.scale())));
+        const PixelSize content = viewport.contentSize();
+        if (content.width <= canvas.width || content.height <= canvas.height)
+        {
+            point = worldAt(viewport, anchor);
+            offsets.clear();
+            ++restarts;
+            continue;
+        }
         expectInsidePixel(viewport, anchor, point);
-        // The first visit of a size records its offset; later visits must match it.
+        // The first visit of a scale records its offset; later visits must match it.
         const PixelPoint expected =
-            offsets.try_emplace(viewport.cellSize(), viewport.offset()).first->second;
+            offsets.try_emplace(viewport.scale(), viewport.offset()).first->second;
         ASSERT_EQ(text(viewport.offset()), text(expected));
     }
+    EXPECT_GT(offsets.size(), 20U);  // most scales, the ones below 1 px included
+    EXPECT_LT(restarts, 200);
 }
 
 TEST(ViewportTest, ZoomingThereAndBackRestoresTheOffset)
@@ -295,7 +351,7 @@ TEST(ViewportTest, ZoomingThereAndBackRestoresTheOffset)
                         viewport.zoomBy(walk > 0 ? 1 : -1, anchor);
                     }
                 }
-                EXPECT_EQ(viewport.cellSize(), size);
+                EXPECT_EQ(viewport.scale().cellSize, size);
                 return text(viewport.offset());
             };
             SCOPED_TRACE(std::format("from {} px at {}", size, text(anchor)));
@@ -328,7 +384,7 @@ TEST(ViewportTest, ZoomingInFromOnePixelKeepsTheAnchorAtTheCellCentre)
     const PixelPoint                       anchor{.x = 537, .y = 300};
     const std::optional<core::UniversePos> cell = viewport.cellAt(anchor);
     ASSERT_TRUE(cell);
-    while (viewport.cellSize() < kMaxCellSize)
+    while (viewport.scale().cellSize < kMaxCellSize)
     {
         viewport.zoomBy(1, anchor);
     }
@@ -347,7 +403,7 @@ TEST(ViewportTest, ACentredAxisDoesNotEndTheOtherAxisRun)
     const PixelPoint                       anchor{.x = 1000, .y = 500};
     const std::optional<core::UniversePos> cell = viewport.cellAt(anchor);
     ASSERT_EQ(text(cell), "(50, 500)");
-    while (viewport.cellSize() < kMaxCellSize)
+    while (viewport.scale().cellSize < kMaxCellSize)
     {
         viewport.zoomBy(1, anchor);
     }
@@ -376,7 +432,9 @@ TEST(ViewportTest, OtherCameraChangesEndARunOfZooms)
     check("scrollTo",
           [](Viewport& v) { v.scrollTo({.x = v.offset().x - 50, .y = v.offset().y + 70}); });
     check("centerOn", [](Viewport& v) { v.centerOn({.x = 4990, .y = 5010}); });
-    check("fitWorld", [](Viewport& v) { v.fitWorld(); });
+    // (fitWorld() would zoom out until the world is centred, and centring moves the next zoom.)
+    check("fitCells",
+          [](Viewport& v) { v.fitCells({.x0 = 4000, .y0 = 4000, .x1 = 4100, .y1 = 4100}); });
     check("setWorldExtent", [](Viewport& v) {
         v.setWorldExtent({.width = 5010, .height = 5010});
     });  // clamps the offset
@@ -515,7 +573,7 @@ TEST(ViewportTest, CellAtMatchesBruteForce)
             const PixelPoint p{.x = pick(rng, -120, 520), .y = pick(rng, -120, 420)};
             ASSERT_EQ(text(viewport.cellAt(p)), text(bruteForceCellAt(viewport, p)))
                 << "point " << text(p) << ", offset " << text(viewport.offset()) << ", cell size "
-                << viewport.cellSize();
+                << viewport.scale().cellSize;
         }
     }
 }
@@ -531,7 +589,7 @@ TEST(ViewportTest, CellOriginAndCellAtAreInverses)
         {
             continue;
         }
-        const int               size = viewport.cellSize();
+        const int               size = viewport.scale().cellSize;
         const core::UniversePos cell{.x = pick(rng, 0, world.width - 1),
                                      .y = pick(rng, 0, world.height - 1)};
         const PixelPoint        origin = viewport.cellOrigin(cell);
@@ -552,16 +610,16 @@ TEST(ViewportTest, VisibleCellsMatchBruteForce)
         const Viewport  viewport = randomViewport(rng);
         const PixelSize canvas   = viewport.canvasSize();
         const Extent    world    = viewport.worldExtent();
-        const Span      xs =
-            bruteForceVisible(viewport.offset().x, canvas.width, world.width, viewport.cellSize());
-        const Span ys = bruteForceVisible(viewport.offset().y, canvas.height, world.height,
-                                          viewport.cellSize());
+        const Span      xs       = bruteForceVisible(viewport.offset().x, canvas.width, world.width,
+                                                     viewport.scale().cellSize);
+        const Span      ys = bruteForceVisible(viewport.offset().y, canvas.height, world.height,
+                                               viewport.scale().cellSize);
         const core::UniverseRect expected{
             .x0 = xs.first, .y0 = ys.first, .x1 = xs.end, .y1 = ys.end};
         ASSERT_EQ(text(viewport.visibleCells()), text(expected))
             << "world " << world.width << "x" << world.height << ", canvas " << canvas.width << "x"
             << canvas.height << ", offset " << text(viewport.offset()) << ", cell size "
-            << viewport.cellSize();
+            << viewport.scale().cellSize;
     }
 }
 
@@ -578,14 +636,14 @@ TEST(ViewportTest, FitWorldPicksTheLargestSizeThatShowsEverything)
     Viewport viewport = makeViewport({.width = 100, .height = 50}, {.width = 1000, .height = 800},
                                      4, {.x = 1, .y = 1});
     viewport.fitWorld();
-    EXPECT_EQ(viewport.cellSize(), 10);  // min(1000 / 100, 800 / 50)
+    EXPECT_EQ(viewport.scale().cellSize, 10);  // min(1000 / 100, 800 / 50)
     EXPECT_EQ(text(viewport.offset()), "(0, -150)");
     EXPECT_EQ(text(viewport.visibleCells()), "[0, 100) x [0, 50)");
 
     viewport.setWorldExtent({.width = 512, .height = 512});
     viewport.setCanvasSize({.width = 1200, .height = 800});
     viewport.fitWorld();
-    EXPECT_EQ(viewport.cellSize(), 1);
+    EXPECT_EQ(viewport.scale().cellSize, 1);
     EXPECT_EQ(text(viewport.offset()), "(-344, -144)");
 }
 
@@ -593,32 +651,33 @@ TEST(ViewportTest, FitWorldStopsAtTheLargestCellSize)
 {
     Viewport viewport = makeViewport({.width = 5, .height = 5}, {.width = 1000, .height = 1000}, 4);
     viewport.fitWorld();
-    EXPECT_EQ(viewport.cellSize(), kMaxCellSize);
+    EXPECT_EQ(viewport.scale().cellSize, kMaxCellSize);
     EXPECT_EQ(text(viewport.offset()), "(-250, -250)");
 }
 
-TEST(ViewportTest, FitWorldCentresAWorldTooLargeToFit)
+TEST(ViewportTest, FitWorldZoomsOutBelowOnePixel)
 {
-    // Even at 1 px the world is larger than the canvas, so the view opens on its centre.
+    // At 1 px the world is larger than the canvas; at 1/32 px it is 625 × 625 pixels, centred.
     Viewport viewport =
         makeViewport({.width = 20'000, .height = 20'000}, {.width = 1000, .height = 800}, 16);
     viewport.fitWorld();
-    EXPECT_EQ(viewport.cellSize(), 1);
-    EXPECT_EQ(text(viewport.offset()), "(9500, 9600)");
-    EXPECT_EQ(text(viewport.cellAt({500, 400})), "(10000, 10000)");
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 5}));
+    EXPECT_EQ(text(viewport.offset()), "(-187, -87)");
+    EXPECT_EQ(text(viewport.cellAt({500, 400})), "(10016, 10016)");
+    EXPECT_EQ(text(viewport.visibleCells()), "[0, 20000) x [0, 20000)");
 }
 
 TEST(ViewportTest, FitWorldHandlesEmptyInputs)
 {
     Viewport noCanvas = makeViewport({.width = 10, .height = 10}, {.width = 0, .height = 0}, 50);
     noCanvas.fitWorld();
-    EXPECT_EQ(noCanvas.cellSize(), kMinCellSize);
+    EXPECT_EQ(noCanvas.scale().cellSize, kMinCellSize);
     EXPECT_EQ(text(noCanvas.visibleCells()), "empty");
 
     Viewport noWorld;
     noWorld.setCanvasSize({.width = 300, .height = 200});
     noWorld.fitWorld();
-    EXPECT_EQ(noWorld.cellSize(), kMaxCellSize);
+    EXPECT_EQ(noWorld.scale().cellSize, kMaxCellSize);
     EXPECT_EQ(text(noWorld.offset()), "(-150, -100)");
     EXPECT_EQ(text(noWorld.visibleCells()), "empty");
 }
@@ -630,23 +689,32 @@ TEST(ViewportTest, FitCellsShowsPartOfTheWorld)
     Viewport viewport =
         makeViewport({.width = 1000, .height = 1000}, {.width = 800, .height = 600}, 4);
     viewport.fitCells({.x0 = 100, .y0 = 200, .x1 = 140, .y1 = 220});
-    EXPECT_EQ(viewport.cellSize(), 20);
+    EXPECT_EQ(viewport.scale().cellSize, 20);
     EXPECT_EQ(text(viewport.offset()), "(2000, 3900)");
     EXPECT_EQ(text(viewport.visibleCells()), "[100, 140) x [195, 225)");
 
     // In a corner, clamping keeps the view inside the world: the cells are shown, not centred.
     viewport.fitCells({.x0 = 0, .y0 = 0, .x1 = 10, .y1 = 10});
-    EXPECT_EQ(viewport.cellSize(), 60);  // min(800 / 10, 600 / 10)
+    EXPECT_EQ(viewport.scale().cellSize, 60);  // min(800 / 10, 600 / 10)
     EXPECT_EQ(text(viewport.offset()), "(0, 0)");
 
-    // Cells that do not fit even at 1 px: the view opens on their middle, as fitWorld() does.
+    // Cells that do not fit at 1 px: 1/2 px, where they are 500 × 500 pixels, as fitWorld() does.
     viewport.fitCells({.x0 = 0, .y0 = 0, .x1 = 1000, .y1 = 1000});
-    EXPECT_EQ(viewport.cellSize(), 1);
-    EXPECT_EQ(text(viewport.offset()), "(100, 200)");
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 1}));
+    EXPECT_EQ(text(viewport.offset()), "(-150, -50)");
+
+    // Below 1 px, pixels count as they are aligned. At 1/2 px, the 520 cells [255, 775) touch 261
+    // pixels, 127 to 387, one more than the canvas is wide, so they need 1/4 px.
+    Viewport narrow =
+        makeViewport({.width = 10'000, .height = 10'000}, {.width = 260, .height = 600}, 4);
+    narrow.fitCells({.x0 = 255, .y0 = 0, .x1 = 775, .y1 = 10});
+    EXPECT_EQ(narrow.scale(), (Scale{.shrink = 2}));
+    EXPECT_LE(narrow.visibleCells().x0, 255);
+    EXPECT_GE(narrow.visibleCells().x1, 775);
     Viewport whole =
         makeViewport({.width = 1000, .height = 1000}, {.width = 800, .height = 600}, 4);
     whole.fitWorld();
-    EXPECT_EQ(whole.cellSize(), viewport.cellSize());
+    EXPECT_EQ(whole.scale().cellSize, viewport.scale().cellSize);
     EXPECT_EQ(text(whole.offset()), text(viewport.offset()));
 }
 
@@ -669,24 +737,24 @@ TEST(ViewportTest, ZoomByWalksTheTable)
     Viewport viewport =
         makeViewport({.width = 100, .height = 100}, {.width = 400, .height = 400}, 4);
     viewport.zoomBy(1, {});
-    EXPECT_EQ(viewport.cellSize(), 5);
+    EXPECT_EQ(viewport.scale().cellSize, 5);
     viewport.zoomBy(3, {});
-    EXPECT_EQ(viewport.cellSize(), 10);
+    EXPECT_EQ(viewport.scale().cellSize, 10);
     viewport.zoomBy(-2, {});
-    EXPECT_EQ(viewport.cellSize(), 6);
+    EXPECT_EQ(viewport.scale().cellSize, 6);
     viewport.zoomBy(0, {});
-    EXPECT_EQ(viewport.cellSize(), 6);
+    EXPECT_EQ(viewport.scale().cellSize, 6);
 
     viewport.zoomBy(100, {});  // clamped to the ends of the table
-    EXPECT_EQ(viewport.cellSize(), 100);
+    EXPECT_EQ(viewport.scale().cellSize, 100);
     viewport.zoomBy(1, {});
-    EXPECT_EQ(viewport.cellSize(), 100);
+    EXPECT_EQ(viewport.scale().cellSize, 100);
     viewport.zoomBy(std::numeric_limits<int>::min(), {});
-    EXPECT_EQ(viewport.cellSize(), 1);
+    EXPECT_EQ(viewport.scale().cellSize, 1);
     viewport.zoomBy(-1, {});
-    EXPECT_EQ(viewport.cellSize(), 1);
+    EXPECT_EQ(viewport.scale().cellSize, 1);
     viewport.zoomBy(std::numeric_limits<int>::max(), {});
-    EXPECT_EQ(viewport.cellSize(), 100);
+    EXPECT_EQ(viewport.scale().cellSize, 100);
 }
 
 TEST(ViewportTest, ZoomByFromSizesNotInTheTable)
@@ -696,7 +764,7 @@ TEST(ViewportTest, ZoomByFromSizesNotInTheTable)
         Viewport viewport =
             makeViewport({.width = 100, .height = 100}, {.width = 400, .height = 400}, cellSize);
         viewport.zoomBy(steps, {});
-        return viewport.cellSize();
+        return viewport.scale().cellSize;
     };
     EXPECT_EQ(zoomedFrom(7, 1), 8);
     EXPECT_EQ(zoomedFrom(7, -1), 6);
@@ -719,10 +787,10 @@ TEST(ViewportTest, ZoomByIsAnchored)
     const PixelPoint                       anchor{.x = 123, .y = 456};
     const std::optional<core::UniversePos> before = viewport.cellAt(anchor);
     viewport.zoomBy(4, anchor);
-    EXPECT_EQ(viewport.cellSize(), 16);
+    EXPECT_EQ(viewport.scale().cellSize, 16);
     EXPECT_EQ(text(viewport.cellAt(anchor)), text(before));
     viewport.zoomBy(-6, anchor);
-    EXPECT_EQ(viewport.cellSize(), 4);
+    EXPECT_EQ(viewport.scale().cellSize, 4);
     EXPECT_EQ(text(viewport.cellAt(anchor)), text(before));
 }
 
@@ -803,7 +871,7 @@ TEST(ViewportTest, AnUnboundedWorldHasNoEdges)
     // Fitting far-away cells works as anywhere else.
     constexpr core::UniverseCoord kFar = core::UniverseCoord{1} << 40;
     viewport.fitCells({.x0 = kFar, .y0 = -kFar, .x1 = kFar + 20, .y1 = -kFar + 10});
-    EXPECT_EQ(viewport.cellSize(), 10);
+    EXPECT_EQ(viewport.scale().cellSize, 10);
     EXPECT_EQ(text(viewport.cellAt({100, 50})),
               text(core::UniversePos{.x = kFar + 10, .y = -kFar + 5}));
     // fitWorld() has no whole to fit and keeps the view.
@@ -834,6 +902,184 @@ TEST(ViewportTest, AnUnboundedViewStopsAtItsReach)
     viewport.setWorldExtent({.width = 10, .height = 10});
     EXPECT_FALSE(viewport.unbounded());
     EXPECT_EQ(text(viewport.cellAt({-1, -1})), "outside");
+}
+
+TEST(ViewportTest, ScalesOrderAndRead)
+{
+    EXPECT_LT((Scale{.shrink = 2}), (Scale{.shrink = 1}));
+    EXPECT_LT((Scale{.shrink = 1}), (Scale{.cellSize = 1}));
+    EXPECT_LT((Scale{.cellSize = 1}), (Scale{.cellSize = 2}));
+    EXPECT_EQ(toString(Scale{.cellSize = 4}), "4 px");
+    EXPECT_EQ(toString(Scale{.shrink = 4}), "1/16 px");
+    EXPECT_EQ(toString(Scale{.shrink = 10}), "1/1,024 px");
+    EXPECT_EQ(toString(Scale{.shrink = 11}), "1/2^11 px");
+}
+
+TEST(ViewportTest, ZoomingOutStopsOnceTheWholeWorldIsInView)
+{
+    // 10,000 cells across 800 pixels: 1/16 px (625 pixels) is the first scale that shows them all.
+    Viewport viewport =
+        makeViewport({.width = 10'000, .height = 3000}, {.width = 800, .height = 600}, 1);
+    EXPECT_EQ(viewport.maxShrink(), 4U);
+    viewport.zoomBy(-1, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 1}));
+    viewport.zoomBy(-100, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 4}));
+    EXPECT_EQ(text(viewport.visibleCells()), "[0, 10000) x [0, 3000)");
+    viewport.setScale({.shrink = 30}, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 4}));
+    // The ladder goes on up through the table.
+    viewport.zoomBy(5, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.cellSize = 2}));
+
+    // A world that fits at 1 px does not zoom out at all.
+    Viewport small = makeViewport({.width = 500, .height = 500}, {.width = 800, .height = 600}, 1);
+    EXPECT_EQ(small.maxShrink(), 0U);
+    small.zoomBy(-1, {});
+    EXPECT_EQ(small.scale(), (Scale{.cellSize = 1}));
+
+    // After the canvas has grown, a view zoomed out beyond the new limit may zoom in, not out.
+    viewport.setScale({.shrink = 4}, {});
+    viewport.setCanvasSize({.width = 1600, .height = 1200});
+    EXPECT_EQ(viewport.maxShrink(), 3U);
+    viewport.zoomBy(-1, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 4}));
+    viewport.zoomBy(1, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 3}));
+}
+
+TEST(ViewportTest, BelowOnePixelEachPixelShowsABlock)
+{
+    // Checked by trying every cell: canvas pixel p shows the cells c with c / 2^shrink, rounded
+    // down, equal to offset + p. cellAt() is the first of them, and cellOrigin() maps it back.
+    core::SplitMix64 rng(3);
+    int              checked = 0;
+    for (int i = 0; i < 300; ++i)
+    {
+        const Extent    world{.width  = static_cast<Coord>(pick(rng, 1, 3000)),
+                              .height = static_cast<Coord>(pick(rng, 1, 3000))};
+        const PixelSize canvas{.width = pick(rng, 1, 200), .height = pick(rng, 1, 150)};
+        const Viewport  viewport =
+            makeViewport(world, canvas, Scale{.shrink = static_cast<unsigned>(pick(rng, 1, 6))},
+                         {.x = pick(rng, -50, 3000), .y = pick(rng, -50, 3000)});
+        const Scale scale = viewport.scale();
+        if (!scale.zoomedOut())
+        {
+            continue;  // the world fits at 1 px
+        }
+        ++checked;
+        const std::int64_t perPixel = scale.cellsPerPixel();
+        SCOPED_TRACE(std::format("world {}x{}, canvas {}x{}, {}, offset {}", world.width,
+                                 world.height, canvas.width, canvas.height, toString(scale),
+                                 text(viewport.offset())));
+
+        const Span xs =
+            bruteForceVisibleBlocks(viewport.offset().x, canvas.width, world.width, perPixel);
+        const Span ys =
+            bruteForceVisibleBlocks(viewport.offset().y, canvas.height, world.height, perPixel);
+        EXPECT_EQ(
+            text(viewport.visibleCells()),
+            text(core::UniverseRect{.x0 = xs.first, .y0 = ys.first, .x1 = xs.end, .y1 = ys.end}));
+
+        for (int j = 0; j < 20; ++j)
+        {
+            const PixelPoint           p{.x = pick(rng, 0, canvas.width - 1),
+                                         .y = pick(rng, 0, canvas.height - 1)};
+            const std::optional<Coord> x =
+                bruteForceFirstCell(viewport.offset().x + p.x, world.width, perPixel);
+            const std::optional<Coord> y =
+                bruteForceFirstCell(viewport.offset().y + p.y, world.height, perPixel);
+            const std::optional<core::UniversePos> expected =
+                x && y ? std::optional(core::UniversePos{.x = *x, .y = *y}) : std::nullopt;
+            EXPECT_EQ(text(viewport.cellAt(p)), text(expected)) << text(p);
+            if (expected)
+            {
+                EXPECT_EQ(text(viewport.cellOrigin(*expected)), text(p));
+            }
+        }
+    }
+    EXPECT_GT(checked, 100);
+}
+
+TEST(ViewportTest, ZoomingBelowOnePixelAndBackRestoresTheOffset)
+{
+    // Down the ladder to 1/64 px and back up, or to and fro across 1 px, or between two levels
+    // below it: every scale comes back to its offset. The view is on the middle of a large world,
+    // so nothing is clamped on the way, wherever the anchor is.
+    for (const int size : {1, 2, 8, 16, 100})
+    {
+        const int toOnePixel = static_cast<int>(nearestZoomStep(size));  // steps down to 1 px
+        for (const PixelPoint anchor : {PixelPoint{.x = 0, .y = 0}, PixelPoint{.x = 101, .y = 73},
+                                        PixelPoint{.x = 199, .y = 149}})
+        {
+            // Each walk moves |walk| steps (in if positive), one step at a time.
+            const auto offsetAfter = [&](const std::vector<int>& walks) {
+                Viewport viewport = makeViewport({.width = 100'000, .height = 100'000},
+                                                 {.width = 200, .height = 150}, size);
+                viewport.centerOn({.x = 50'000, .y = 50'000});
+                for (const int walk : walks)
+                {
+                    for (int i = 0; i < std::abs(walk); ++i)
+                    {
+                        viewport.zoomBy(walk > 0 ? 1 : -1, anchor);
+                    }
+                }
+                EXPECT_EQ(viewport.scale(), (Scale{.cellSize = size}));
+                return text(viewport.offset());
+            };
+            SCOPED_TRACE(std::format("from {} px at {}", size, text(anchor)));
+            const std::string home = offsetAfter({});
+            EXPECT_EQ(offsetAfter({-(toOnePixel + 6), toOnePixel + 6}), home) << "down and up";
+            std::vector<int> acrossOnePixel{-(toOnePixel + 1)};
+            std::vector<int> belowOnePixel{-(toOnePixel + 3)};
+            for (int i = 0; i < 10; ++i)
+            {
+                acrossOnePixel.insert(acrossOnePixel.end(), {1, -1});
+                belowOnePixel.insert(belowOnePixel.end(), {-1, 1});
+            }
+            acrossOnePixel.push_back(toOnePixel + 1);
+            belowOnePixel.push_back(toOnePixel + 3);
+            EXPECT_EQ(offsetAfter(acrossOnePixel), home) << "across 1 px";
+            EXPECT_EQ(offsetAfter(belowOnePixel), home) << "between 1/8 and 1/16 px";
+        }
+    }
+}
+
+TEST(ViewportTest, AnUnboundedViewZoomsOutToTheWholeUniverse)
+{
+    Viewport viewport;
+    viewport.setUnbounded();
+    viewport.setCanvasSize({.width = 1000, .height = 600});
+    viewport.setCellSize(1, {});
+    // The universe is 2^62 cells across; at 2^53 cells a pixel it is 512 pixels, which fit.
+    EXPECT_EQ(viewport.maxShrink(), 53U);
+    const PixelPoint centre{.x = 500, .y = 300};
+    viewport.zoomBy(-1000, centre);
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = 53}));
+    // Centred, with nothing beyond its edges.
+    EXPECT_EQ(text(viewport.offset()), "(-500, -300)");
+    constexpr core::UniverseCoord kEdge = core::kUniverseRadius;
+    EXPECT_EQ(text(viewport.visibleCells()),
+              text(core::UniverseRect{.x0 = -kEdge, .y0 = -kEdge, .x1 = kEdge, .y1 = kEdge}));
+    EXPECT_EQ(text(viewport.cellAt({.x = 0, .y = 0})), "outside");
+    EXPECT_EQ(text(viewport.cellAt(centre)), "(0, 0)");
+    EXPECT_EQ(text(viewport.cellAt({.x = 244, .y = 44})),
+              text(core::UniversePos{.x = -kEdge, .y = -kEdge}));
+    // And all the way back in, to where it started.
+    viewport.zoomBy(53, centre);
+    EXPECT_EQ(viewport.scale(), (Scale{.cellSize = 1}));
+    EXPECT_EQ(text(viewport.offset()), "(0, 0)");
+
+    // A one-pixel canvas stops at kMaxShrink, where the universe is 4 pixels wide, without
+    // overflowing anywhere.
+    viewport.setCanvasSize({.width = 1, .height = 1});
+    viewport.zoomBy(-1000, {});
+    EXPECT_EQ(viewport.scale(), (Scale{.shrink = Viewport::kMaxShrink}));
+    viewport.panBy(-100, -100);
+    EXPECT_EQ(text(viewport.cellAt({})), text(core::UniversePos{.x = -kEdge, .y = -kEdge}));
+    viewport.panBy(100, 100);
+    EXPECT_EQ(text(viewport.visibleCells()),
+              text(core::UniverseRect{.x0 = kEdge / 2, .y0 = kEdge / 2, .x1 = kEdge, .y1 = kEdge}));
 }
 
 }  // namespace

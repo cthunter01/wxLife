@@ -747,9 +747,9 @@ TEST_F(GuiSmokeTest, OpensPausedWithARandomWorldFitted)
     // scale when it paints, so this is checked after a paint.
     if (repaint())
     {
-        EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
+        EXPECT_EQ(m_canvas->scale().cellSize, fittedCellSize());
     }
-    EXPECT_EQ(m_panel->cellSize(), m_canvas->cellSize());
+    EXPECT_EQ(m_panel->scale().cellSize, m_canvas->scale().cellSize);
     EXPECT_TRUE(m_canvas->showGrid());
     EXPECT_EQ(m_panel->speed(), defaults::kSpeed);
     EXPECT_EQ(m_panel->ruleText(), "B3/S23");
@@ -846,7 +846,7 @@ TEST_F(GuiSmokeTest, ClearsRandomizesAndDrawsWithTheMouse)
 
     // At 8 px a short drag crosses several cells. A left drag from a dead cell draws a line.
     type(first<wxSpinCtrl>(group("View")), 8);
-    ASSERT_EQ(m_canvas->cellSize(), 8);
+    ASSERT_EQ(m_canvas->scale().cellSize, 8);
     const wxPoint                      start     = canvasCentre();
     const wxPoint                      end       = start + wxPoint(40, 16);
     const std::optional<core::CellPos> startCell = pointAt(start);
@@ -998,7 +998,7 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
     {
         command(ID_ZOOM_OUT);
     }
-    EXPECT_EQ(m_canvas->cellSize(), render::kMinCellSize);
+    EXPECT_EQ(m_canvas->scale().cellSize, render::kMinCellSize);
     EXPECT_EQ(cellSize.GetValue(), render::kMinCellSize);
     EXPECT_TRUE(status(StatusField::VIEW).ends_with("· 1 px · grid hidden < 5 px"))
         << status(StatusField::VIEW);
@@ -1007,7 +1007,7 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
     {
         command(ID_ZOOM_IN);
     }
-    EXPECT_EQ(m_canvas->cellSize(), render::kMaxCellSize);
+    EXPECT_EQ(m_canvas->scale().cellSize, render::kMaxCellSize);
     EXPECT_EQ(cellSize.GetValue(), render::kMaxCellSize);
     EXPECT_EQ(zoomSlider.GetValue(), static_cast<int>(render::kZoomSteps.size() - 1));
     EXPECT_TRUE(status(StatusField::VIEW).ends_with("· 100 px")) << status(StatusField::VIEW);
@@ -1059,26 +1059,26 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
     // Fit shows the whole world, from the menu, the F key and the panel button alike.
     command(ID_ZOOM_FIT);
     const int fitted = fittedCellSize();
-    EXPECT_EQ(m_canvas->cellSize(), fitted);
+    EXPECT_EQ(m_canvas->scale().cellSize, fitted);
     typeChar(*m_canvas, '+');
-    const int zoomedIn = m_canvas->cellSize();
+    const int zoomedIn = m_canvas->scale().cellSize;
     EXPECT_GT(zoomedIn, fitted);
     typeChar(*m_canvas, '=');
     typeChar(*m_canvas, '-');
-    EXPECT_EQ(m_canvas->cellSize(), zoomedIn);
+    EXPECT_EQ(m_canvas->scale().cellSize, zoomedIn);
     pressKey(*m_canvas, 'F');
-    EXPECT_EQ(m_canvas->cellSize(), fitted);
+    EXPECT_EQ(m_canvas->scale().cellSize, fitted);
     pressKey(*m_canvas, WXK_NUMPAD_ADD);
     click(labelled<wxButton>(*m_panel, "Fit"));
-    EXPECT_EQ(m_canvas->cellSize(), fitted);
+    EXPECT_EQ(m_canvas->scale().cellSize, fitted);
     EXPECT_EQ(cellSize.GetValue(), fitted);
 
     // The spin control takes any size; the slider moves along the zoom steps.
     type(cellSize, 37);
-    EXPECT_EQ(m_canvas->cellSize(), 37);
+    EXPECT_EQ(m_canvas->scale().cellSize, 37);
     EXPECT_EQ(zoomSlider.GetValue(), static_cast<int>(render::nearestZoomStep(37)));
     drag(zoomSlider, 3);
-    EXPECT_EQ(m_canvas->cellSize(), render::kZoomSteps[3]);
+    EXPECT_EQ(m_canvas->scale().cellSize, render::kZoomSteps[3]);
     EXPECT_EQ(cellSize.GetValue(), render::kZoomSteps[3]);
 
     // Ctrl+wheel zooms at the pointer, which stays over the same cell.
@@ -1088,10 +1088,10 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
     const std::optional<core::CellPos> cell    = pointAt(pointer);
     ASSERT_TRUE(cell);
     turnWheel(*m_canvas, pointer, 1, wxMOD_CONTROL);
-    EXPECT_EQ(m_canvas->cellSize(), 20);
+    EXPECT_EQ(m_canvas->scale().cellSize, 20);
     EXPECT_EQ(pointAt(pointer), cell);
     turnWheel(*m_canvas, pointer, -2, wxMOD_CONTROL);
-    EXPECT_EQ(m_canvas->cellSize(), 12);
+    EXPECT_EQ(m_canvas->scale().cellSize, 12);
     EXPECT_EQ(pointAt(pointer), cell);
 
     // A plain wheel notch down scrolls 3 lines of max(cell size, 16) px.
@@ -1102,7 +1102,7 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
     // Ctrl and a key belong to the menu accelerators, so the canvas ignores it.
     pressKey(*m_canvas, '+', wxMOD_CONTROL);
     typeChar(*m_canvas, '+', wxMOD_CONTROL);
-    EXPECT_EQ(m_canvas->cellSize(), 12);
+    EXPECT_EQ(m_canvas->scale().cellSize, 12);
 
     // When the view moves under a resting pointer, the status bar shows the cell now under it.
     const auto expectHoverFollows = [&](const std::function<void()>& moveView) {
@@ -1359,7 +1359,7 @@ TEST_F(GuiSmokeTest, ResizesTheWorldThroughTheSizeDialog)
     const std::string worldInfo =
         "1,001 × 1,000 cells\n" + core::formatBytes(core::worldBytes(m_world.extent()));
     EXPECT_NE(wxWindow::FindWindowByLabel(toWx(worldInfo), m_panel), nullptr);
-    EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
+    EXPECT_EQ(m_canvas->scale().cellSize, fittedCellSize());
     repaint();
 
     // The simulation keeps running in the larger world.
@@ -1407,7 +1407,7 @@ TEST_F(GuiSmokeTest, ResizesTheWorldThroughTheSizeDialog)
     EXPECT_EQ(m_world.population(), 0);
     EXPECT_EQ(m_world.generation(), 0U);
     EXPECT_EQ(status(StatusField::STATE), "Paused");
-    EXPECT_EQ(m_canvas->cellSize(), render::kMaxCellSize);
+    EXPECT_EQ(m_canvas->scale().cellSize, render::kMaxCellSize);
     EXPECT_EQ(hoveredCell(), (core::CellPos{0, 0}));
     repaint();
     mouse(*m_canvas, wxEVT_LEFT_DOWN, canvasCentre());
@@ -1455,7 +1455,7 @@ TEST_F(GuiSmokeTest, LoadsDemoPatterns)
     EXPECT_EQ(status(StatusField::WORLD), "320 × 240 · bounded · B3/S23 · Banded");
     EXPECT_EQ(status(StatusField::SPEED), "30 gen/s");
     EXPECT_FALSE(menuItem(ID_TOGGLE_WRAP).IsChecked());
-    EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
+    EXPECT_EQ(m_canvas->scale().cellSize, fittedCellSize());
     repaint();
     for (int g = 0; g < 30; ++g)
     {
@@ -1538,7 +1538,7 @@ TEST_F(GuiSmokeTest, OpensPatternFiles)
     EXPECT_EQ(m_world.generation(), 0U);
     EXPECT_EQ(status(StatusField::STATE), "Paused");
     EXPECT_EQ(status(StatusField::WORLD), "103 × 103 · torus · B36/S23 · Banded");
-    EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
+    EXPECT_EQ(m_canvas->scale().cellSize, fittedCellSize());
     repaint();
 
     // Files that cannot be used say why and leave the world alone.
@@ -1645,7 +1645,7 @@ TEST_F(GuiSmokeTest, RunsUnboundedWorlds)
     EXPECT_EQ(status(StatusField::WORLD), "Unbounded · B3/S23 · HashLife");
 
     // Randomize fills what the view shows: at 2 px, some hundred thousand cells.
-    m_canvas->setCellSize(2);
+    m_canvas->setScale({.cellSize = 2});
     command(ID_RANDOMIZE);
     EXPECT_GT(m_world.population(), 10'000);
     const core::UniverseRect view = m_canvas->visibleCells();
@@ -1672,6 +1672,108 @@ TEST_F(GuiSmokeTest, RunsUnboundedWorlds)
     EXPECT_EQ(m_world.kind(), core::WorldKind::FIXED_SIZE);
     EXPECT_TRUE(
         std::ranges::contains(answers.sizeTexts, "Langton's ant needs a fixed-size world."));
+}
+
+TEST_F(GuiSmokeTest, ZoomsOutBelowOnePixel)
+{
+    auto&         cellSize   = first<wxSpinCtrl>(group("View"));
+    auto&         zoomSlider = first<wxSlider>(group("View"));
+    DialogAnswers answers;
+
+    // A world far larger than the canvas: Fit zooms out below 1 px until all of it shows.
+    answers.worldSize =
+        DialogAnswers::SizeEntry{.width = "6000", .height = "5000", .keepPattern = false};
+    command(ID_WORLD_SIZE);
+    command(ID_RANDOMIZE);
+    repaint();
+    const render::Scale fitted = m_canvas->scale();
+    ASSERT_TRUE(fitted.zoomedOut());
+    EXPECT_EQ(fitted.shrink, m_canvas->maxShrink());
+    EXPECT_EQ(m_canvas->visibleCells(),
+              (core::UniverseRect{.x0 = 0, .y0 = 0, .x1 = 6000, .y1 = 5000}));
+    // The panel shows the scale in place of the size box, and so does the status bar.
+    const std::string scaleText = render::toString(fitted);
+    EXPECT_FALSE(cellSize.IsShown());
+    EXPECT_TRUE(labelled<wxStaticText>(group("View"), scaleText).IsShown());
+    EXPECT_EQ(zoomSlider.GetValue(), -static_cast<int>(fitted.shrink));
+    EXPECT_TRUE(status(StatusField::VIEW).ends_with("· " + scaleText + " · grid hidden < 5 px"))
+        << status(StatusField::VIEW);
+    // No further out: the whole world is in view.
+    command(ID_ZOOM_OUT);
+    EXPECT_EQ(m_canvas->scale(), fitted);
+
+    // One step in, the world is larger than the canvas again. A drag pans instead of drawing,
+    // with either button.
+    command(ID_ZOOM_IN);
+    ASSERT_EQ(m_canvas->scale().shrink, fitted.shrink - 1);
+    const core::CellCount    population = m_world.population();
+    const core::UniverseRect before     = m_canvas->visibleCells();
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, canvasCentre());
+    pointAt(canvasCentre() - wxPoint(50, 40));
+    mouse(*m_canvas, wxEVT_LEFT_UP, canvasCentre() - wxPoint(50, 40));
+    EXPECT_NE(m_canvas->visibleCells(), before);
+    mouse(*m_canvas, wxEVT_RIGHT_DOWN, canvasCentre());
+    pointAt(canvasCentre() + wxPoint(50, 40));
+    mouse(*m_canvas, wxEVT_RIGHT_UP, canvasCentre() + wxPoint(50, 40));
+    EXPECT_EQ(m_canvas->visibleCells(), before);
+    EXPECT_EQ(m_world.population(), population);
+    repaint();
+
+    // The slider goes on into the table, where the size box comes back, and out again.
+    drag(zoomSlider, 0);
+    EXPECT_EQ(m_canvas->scale(), (render::Scale{.cellSize = 1}));
+    EXPECT_TRUE(cellSize.IsShown());
+    EXPECT_EQ(cellSize.GetValue(), 1);
+    drag(zoomSlider, -1);
+    EXPECT_EQ(m_canvas->scale(), (render::Scale{.shrink = 1}));
+    EXPECT_FALSE(cellSize.IsShown());
+
+    // Ctrl+wheel zooms in from there, the pointer staying over the block it was on.
+    const wxPoint                      pointer = canvasCentre() + wxPoint(37, -23);
+    const std::optional<core::CellPos> block   = pointAt(pointer);  // its first cell
+    turnWheel(*m_canvas, pointer, 1, wxMOD_CONTROL);
+    EXPECT_EQ(m_canvas->scale(), (render::Scale{.cellSize = 1}));
+    const std::optional<core::CellPos> cell = pointAt(pointer);
+    ASSERT_TRUE(block.has_value() && cell.has_value());
+    const core::CellPos from = block.value();
+    const core::CellPos to   = cell.value();
+    EXPECT_TRUE(to.x - from.x >= 0 && to.x - from.x < 2) << to.x << " " << from.x;
+    EXPECT_TRUE(to.y - from.y >= 0 && to.y - from.y < 2) << to.y << " " << from.y;
+
+    // On an unbounded plane, Fit zooms out to show two cells 3000 apart...
+    answers.worldSize = DialogAnswers::SizeEntry{
+        .width = "", .height = "", .keepPattern = false, .kind = core::WorldKind::UNBOUNDED};
+    command(ID_WORLD_SIZE);
+    ASSERT_EQ(m_world.kind(), core::WorldKind::UNBOUNDED);
+    const std::filesystem::path pair =
+        std::filesystem::temp_directory_path() / "wxLife_test_far_pair.rle";
+    std::ofstream(pair, std::ios::binary) << "x = 3001, y = 1\no2999bo!\n";
+    ASSERT_TRUE(m_frame->openPatternFile(toWx(pair.string())));
+    std::filesystem::remove(pair);
+    command(ID_ZOOM_FIT);
+    EXPECT_TRUE(m_canvas->scale().zoomedOut());
+    const core::UniverseRect shown = m_canvas->visibleCells();
+    EXPECT_TRUE(shown.x0 <= -1500 && shown.x1 > 1500) << shown.x0 << " " << shown.x1;
+    repaint();
+    // ...and zooming out goes on until the whole universe fits the canvas.
+    for (int i = 0; i < 70; ++i)
+    {
+        command(ID_ZOOM_OUT);
+    }
+    EXPECT_GT(m_canvas->maxShrink(), 40U);
+    EXPECT_EQ(m_canvas->scale().shrink, m_canvas->maxShrink());
+    EXPECT_TRUE(status(StatusField::VIEW).contains("1/2^")) << status(StatusField::VIEW);
+    repaint();
+
+    // Randomize fills only the middle of so wide a view, at most 4096 cells each way.
+    type(first<wxSpinCtrl>(group("Simulation")), 1);  // the density, in percent
+    command(ID_RANDOMIZE);
+    const core::UniverseRect filled = m_world.plane().bounds().value();
+    EXPECT_LE(filled.x1 - filled.x0, 4096);
+    EXPECT_LE(filled.y1 - filled.y0, 4096);
+    EXPECT_TRUE(filled.x0 < 0 && filled.x1 > 0 && filled.y0 < 0 && filled.y1 > 0);
+    EXPECT_GT(m_world.population(), 100'000);
+    repaint();
 }
 
 TEST_F(GuiSmokeTest, QuitsCleanlyInTheMiddleOfAStroke)

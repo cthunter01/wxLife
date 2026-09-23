@@ -21,6 +21,7 @@
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
 #include "wxLife/core/Types.h"
+#include "wxLife/render/Types.h"
 
 namespace wxLife::ui
 {
@@ -49,11 +50,13 @@ public:
     /// Generations per step, 2^exponent; shows the count beside it.
     void                   setStepExponent(unsigned exponent);
     [[nodiscard]] unsigned stepExponent() const;
-    void                   setCellSize(int px);
-    /// Device pixels, 1..100.
-    [[nodiscard]] int cellSize() const;
-    void              setShowGrid(bool show);
-    void              setWrap(bool wrap);
+    /// The slider spans the zoom ladder from `maxShrink` levels below 1 px up to the largest
+    /// render::kZoomSteps entry. Below 1 px the size box gives way to a text such as "1/16 px".
+    void setScale(render::Scale scale, unsigned maxShrink);
+    /// As last set, or as the user has since chosen with the slider or the size box.
+    [[nodiscard]] render::Scale scale() const;
+    void                        setShowGrid(bool show);
+    void                        setWrap(bool wrap);
     /// Two lines: "512 × 512 cells" and "516 KiB".
     void setWorldInfo(core::Extent extent, std::uint64_t bytes);
     /// Two lines: "Unbounded plane" and "12.3 MiB in use".
@@ -77,6 +80,8 @@ private:
     void addWorldGroup(wxSizer& column);
     void addRuleGroup(wxSizer& column);
     void setWorldInfoText(const wxString& text);
+    /// Shows m_scale in the size box, or below 1 px in m_scaleText.
+    void showScale();
     /// Enables the controls that the automaton and the kind of world use.
     void updateEnabled();
 
@@ -90,10 +95,13 @@ private:
     wxSpinCtrl*   m_speedSpin{};    ///< Speed::kMin..kMax
     wxCheckBox*   m_maxSpeed{};
     wxStaticText* m_stepLabel{};
-    wxSpinCtrl*   m_stepExponent{};    ///< 0..SimulationRunner::kMaxStepExponent
-    wxStaticText* m_stepSize{};        ///< "4,096 generations per step"
-    wxSlider*     m_cellSizeSlider{};  ///< Index into render::kZoomSteps
-    wxSpinCtrl*   m_cellSizeSpin{};    ///< 1..100 px
+    wxSpinCtrl*   m_stepExponent{};  ///< 0..SimulationRunner::kMaxStepExponent
+    wxStaticText* m_stepSize{};      ///< "4,096 generations per step"
+    /// Places on the zoom ladder: kZoomSteps indices from 0 up, shrink levels from -1 down.
+    wxSlider*     m_cellSizeSlider{};
+    wxSpinCtrl*   m_cellSizeSpin{};  ///< 1..100 px; hidden below 1 px
+    wxStaticText* m_cellSizeUnit{};  ///< "px", hidden with the size box
+    wxStaticText* m_scaleText{};     ///< "1/16 px", shown only below 1 px
     wxCheckBox*   m_showGrid{};
     wxStaticText* m_worldInfo{};
     wxCheckBox*   m_wrap{};
@@ -102,6 +110,7 @@ private:
     wxTextCtrl*   m_ruleText{};    ///< wxTE_PROCESS_ENTER
     wxStaticText* m_ruleError{};
 
+    render::Scale   m_scale;
     core::Automaton m_shownAutomaton = core::Automaton::LIFE;
     core::WorldKind m_shownKind      = core::WorldKind::FIXED_SIZE;
 };

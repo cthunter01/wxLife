@@ -5,12 +5,14 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <span>
 #include <vector>
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Grid.h"
 #include "wxLife/core/HashLife.h"
+#include "wxLife/core/ParallelBands.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
@@ -60,13 +62,15 @@ void fillPixels(Bytes run, Rgb color) noexcept
     }
 }
 
-// Where the world lands on the canvas in this frame.
+// Where the world lands on the canvas in this frame. Below 1 px, a "cell" of the layout is a block
+// of 2^shrink × 2^shrink world cells, one pixel, and its coordinates count blocks.
 struct Layout
 {
     PixelSize          canvas{};
     int                cellSize = 1;
+    unsigned           shrink   = 0;
     PixelPoint         offset{};
-    core::UniverseRect cells{};  // visible cells
+    core::UniverseRect cells{};  // visible cells (or blocks)
     bool               gridLines  = false;
     int                majorEvery = 0;  // 0 or less: no major lines
     // Canvas columns [left, right) and rows [top, bottom) show the world.
@@ -84,6 +88,12 @@ struct Layout
         return (Pixel{cy} * cellSize) - offset.y;
     }
 
+    // The layout cell that holds world cell c: c itself, or below 1 px its block.
+    [[nodiscard]] core::UniverseCoord cellOf(core::UniverseCoord c) const noexcept
+    {
+        return core::floorDiv(c, std::int64_t{1} << shrink);
+    }
+
     // Whether the grid line in the last pixel column (or row) of cell column (or row) c is major.
     // C++'s remainder keeps the sign, so the lines fall on multiples left of the centre too.
     [[nodiscard]] bool majorLineAfter(core::UniverseCoord c) const noexcept
@@ -92,13 +102,34 @@ struct Layout
     }
 };
 
+// The blocks of 2^shrink × 2^shrink cells that hold `cells`; `cells` itself at 1 px and above.
+core::UniverseRect blocksOf(core::UniverseRect cells, Scale scale) noexcept
+{
+    if (cells.empty())
+    {
+        return {};  // an empty side may still have a length on the other axis
+    }
+    if (!scale.zoomedOut())
+    {
+        return cells;
+    }
+    const std::int64_t side = scale.cellsPerPixel();
+    return {.x0 = core::floorDiv(cells.x0, side),
+            .y0 = core::floorDiv(cells.y0, side),
+            .x1 = core::floorDiv(cells.x1 - 1, side) + 1,
+            .y1 = core::floorDiv(cells.y1 - 1, side) + 1};
+}
+
 Layout makeLayout(const Viewport& viewport, const RenderStyle& style) noexcept
 {
+    const Scale scale = viewport.scale();
+    // Below 1 px, content pixel p is block p, so the offset needs no change.
     Layout layout{.canvas     = viewport.canvasSize(),
-                  .cellSize   = viewport.cellSize(),
+                  .cellSize   = scale.cellSize,
+                  .shrink     = scale.shrink,
                   .offset     = viewport.offset(),
-                  .cells      = viewport.visibleCells(),
-                  .gridLines  = style.gridVisibleAt(viewport.cellSize()),
+                  .cells      = blocksOf(viewport.visibleCells(), scale),
+                  .gridLines  = style.gridVisibleAt(scale),
                   .majorEvery = style.majorGridEvery};
     layout.left   = std::max<Pixel>(0, layout.cellLeft(layout.cells.x0));
     layout.right  = std::min(layout.canvas.width, layout.cellLeft(layout.cells.x1));
@@ -187,22 +218,101 @@ void drawScanline(Bytes scan, std::span<const core::Cell> cellRow, core::Univers
     }
 }
 
+// Makes each block of `blocks` in `window` alive if any of its cells in `grid` is. The block rows
+// are split into bands on several threads; `scratch` gets one row per band, in which the cell rows
+// of a block row are ORed together before each block's run of it is.
+void shrinkGrid(const core::Grid& grid, unsigned shrink, core::UniverseRect blocks,
+                core::Grid& window, std::vector<std::vector<core::Cell>>& scratch)
+{
+    const std::int64_t side  = std::int64_t{1} << shrink;
+    const core::Extent world = grid.extent();
+    const auto         first = static_cast<std::size_t>(blocks.x0 * side);
+    const auto         end =
+        static_cast<std::size_t>(std::min<std::int64_t>(blocks.x1 * side, world.width));
+    const auto width = end - first;
+    const auto rows  = static_cast<core::Coord>(blocks.y1 - blocks.y0);
+    const auto read  = static_cast<core::CellCount>(width) * rows * side;
+
+    const unsigned bands = core::suggestedBandCount(read);
+    scratch.resize(bands);
+    for (std::vector<core::Cell>& row : scratch)
+    {
+        row.resize(width);
+    }
+    core::forEachBand(rows, bands, [&](unsigned band, core::Coord firstRow, core::Coord endRow) {
+        const std::span<core::Cell> any = scratch.at(band);
+        for (core::Coord row = firstRow; row < endRow; ++row)
+        {
+            const std::int64_t top    = (blocks.y0 + row) * side;
+            const std::int64_t bottom = std::min<std::int64_t>(top + side, world.height);
+            std::ranges::copy(grid.row(static_cast<core::Coord>(top)).subspan(first, width),
+                              any.begin());
+            for (std::int64_t y = top + 1; y < bottom; ++y)
+            {
+                std::ranges::transform(any,
+                                       grid.row(static_cast<core::Coord>(y)).subspan(first, width),
+                                       any.begin(), std::bit_or<>{});
+            }
+            // Cells are 0 or 1, so ORing a block's run tells whether any is alive.
+            const std::span<core::Cell> out = window.row(row);
+            for (std::size_t block = 0; block < out.size(); ++block)
+            {
+                const std::size_t from  = block * static_cast<std::size_t>(side);
+                const std::size_t to    = std::min(from + static_cast<std::size_t>(side), width);
+                core::Cell        alive = core::kDead;
+                for (const core::Cell cell : any.subspan(from, to - from))
+                {
+                    alive |= cell;
+                }
+                out[block] = alive;
+            }
+        }
+    });
+}
+
 }  // namespace
 
 void Rasterizer::render(const core::Grid& grid, const Viewport& viewport, const RenderStyle& style,
                         PixelBuffer& out)
 {
     assert(!viewport.unbounded() && viewport.worldExtent() == grid.extent());
-    paint(grid, {}, viewport, style, out);
+    const Scale scale = viewport.scale();
+    if (!scale.zoomedOut())
+    {
+        paint(grid, {}, viewport, style, out);
+        return;
+    }
+    // Below 1 px, a grid of blocks, one per pixel, is painted instead of the cells.
+    const core::UniverseRect blocks = blocksOf(viewport.visibleCells(), scale);
+    resetWindow(blocks);
+    shrinkGrid(grid, scale.shrink, blocks, m_window, m_bandRows);
+    paint(m_window, {.x = blocks.x0, .y = blocks.y0}, viewport, style, out);
 }
 
 void Rasterizer::render(const core::HashLife& plane, const Viewport& viewport,
                         const RenderStyle& style, PixelBuffer& out)
 {
     assert(viewport.unbounded());
+    const Scale              scale   = viewport.scale();
     const core::UniverseRect visible = viewport.visibleCells();
-    const core::Extent       extent{.width  = static_cast<core::Coord>(visible.x1 - visible.x0),
-                                    .height = static_cast<core::Coord>(visible.y1 - visible.y0)};
+    const core::UniverseRect blocks  = blocksOf(visible, scale);
+    resetWindow(blocks);
+    // forEachBlock() aligns its blocks as the pixels are: to multiples of 2^shrink cells.
+    plane.forEachBlock(visible, scale.shrink, [&](core::UniversePos corner) {
+        m_window.set({.x = static_cast<core::Coord>(
+                          core::floorDiv(corner.x, scale.cellsPerPixel()) - blocks.x0),
+                      .y = static_cast<core::Coord>(
+                          core::floorDiv(corner.y, scale.cellsPerPixel()) - blocks.y0)},
+                     core::kAlive);
+    });
+    paint(m_window, {.x = blocks.x0, .y = blocks.y0}, viewport, style, out);
+}
+
+void Rasterizer::resetWindow(core::UniverseRect cells)
+{
+    const core::Extent extent{
+        .width  = static_cast<core::Coord>(std::max<core::UniverseCoord>(cells.x1 - cells.x0, 0)),
+        .height = static_cast<core::Coord>(std::max<core::UniverseCoord>(cells.y1 - cells.y0, 0))};
     if (m_window.extent() == extent)
     {
         m_window.clear();
@@ -211,12 +321,6 @@ void Rasterizer::render(const core::HashLife& plane, const Viewport& viewport,
     {
         m_window = core::Grid(extent);
     }
-    plane.forEachBlock(visible, 0, [&](core::UniversePos cell) {
-        m_window.set({.x = static_cast<core::Coord>(cell.x - visible.x0),
-                      .y = static_cast<core::Coord>(cell.y - visible.y0)},
-                     core::kAlive);
-    });
-    paint(m_window, {.x = visible.x0, .y = visible.y0}, viewport, style, out);
 }
 
 void Rasterizer::paint(const core::Grid& grid, core::UniversePos origin, const Viewport& viewport,
@@ -292,7 +396,8 @@ void drawAnts(std::span<const core::Ant> ants, const Viewport& viewport, const R
 
     for (const core::Ant& ant : ants)
     {
-        const core::CellPos cell = ant.position;
+        const core::UniversePos cell{.x = layout.cellOf(ant.position.x),
+                                     .y = layout.cellOf(ant.position.y)};
         if (cell.x < layout.cells.x0 || cell.x >= layout.cells.x1 || cell.y < layout.cells.y0 ||
             cell.y >= layout.cells.y1)
         {

@@ -82,6 +82,7 @@ public:
     static constexpr unsigned kMaxLevel = 62;
     /// Cells can be set anywhere in [-kRadius, kRadius) on each axis.
     static constexpr UniverseCoord kRadius = UniverseCoord{1} << (kMaxLevel - 1);
+    static_assert(kRadius == kUniverseRadius);
     /// The largest step: 2^59 generations. A step also needs the pattern within
     /// [-2^(kMaxLevel-3), 2^(kMaxLevel-3)), so the result stays inside the largest root.
     static constexpr unsigned kMaxStepExponent = kMaxLevel - 3;

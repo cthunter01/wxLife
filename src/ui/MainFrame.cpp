@@ -42,6 +42,8 @@
 #include "wxLife/core/World.h"
 #include "wxLife/core/WorldLimits.h"
 #include "wxLife/render/RenderStyle.h"
+#include "wxLife/render/Types.h"
+#include "wxLife/render/Viewport.h"
 #include "wxLife/ui/CommandIds.h"
 #include "wxLife/ui/ControlPanel.h"
 #include "wxLife/ui/Defaults.h"
@@ -68,6 +70,7 @@ constexpr std::string_view kControlsHelp = R"(Mouse on the world
     Ctrl+left click: add or remove an ant (Langton's ant)
     Wheel: scroll (Shift: horizontally)
     Ctrl+wheel: zoom at the pointer
+    Zoomed out below 1 px per cell: every drag pans
 
 Keys while the world has focus (click it first)
     Space: run or pause
@@ -134,6 +137,9 @@ using StatusBar = wxStatusBar;
 
 /// Pattern files larger than this are not read: no pattern that fits a world is anywhere near it.
 constexpr std::uint64_t kMaxPatternFileBytes = std::uint64_t{256} << 20;
+
+// Randomize on an unbounded plane fills at most this many cells along each side of the view.
+constexpr core::UniverseCoord kMaxRandomSide = 4096;
 
 // The whole file, or a message that says why it cannot be read.
 [[nodiscard]] std::expected<std::string, std::string> readPatternFile(const wxString& path)
@@ -361,10 +367,18 @@ void MainFrame::onRandomize()
         worldContentChanged();
         return;
     }
-    // A plane has no whole to fill, so what the view shows is filled.
-    core::UniverseRect area = m_canvas->visibleCells();
-    area.x1                 = std::min(area.x1, area.x0 + core::kMaxWorldSide);
-    area.y1                 = std::min(area.y1, area.y0 + core::kMaxWorldSide);
+    // A plane has no whole to fill, so what the view shows is filled: at most its middle
+    // kMaxRandomSide cells each way, about what a 4K screen shows at 1 px. Zoomed out, a view
+    // can show billions of cells.
+    const core::UniverseRect visible = m_canvas->visibleCells();
+    const auto               middle  = [](core::UniverseCoord from, core::UniverseCoord to) {
+        const core::UniverseCoord cut =
+            std::max<core::UniverseCoord>(to - from - kMaxRandomSide, 0);
+        return std::pair{from + (cut / 2), to - (cut - (cut / 2))};
+    };
+    const auto [x0, x1] = middle(visible.x0, visible.x1);
+    const auto [y0, y1] = middle(visible.y0, visible.y1);
+    const core::UniverseRect area{.x0 = x0, .y0 = y0, .x1 = x1, .y1 = y1};
     try
     {
         const wxBusyCursor busy;
@@ -584,7 +598,7 @@ void MainFrame::onCenterView()
 
 void MainFrame::onCellSizeChanged()
 {
-    m_canvas->setCellSize(m_panel->cellSize());
+    m_canvas->setScale(m_panel->scale());
 }
 
 void MainFrame::onToggleGrid()
@@ -768,7 +782,7 @@ void MainFrame::onToggleAnt(core::UniversePos cell)
 
 void MainFrame::onViewChanged()
 {
-    m_panel->setCellSize(m_canvas->cellSize());
+    m_panel->setScale(m_canvas->scale(), m_canvas->maxShrink());
     updateStatusBar(true);
 }
 
@@ -959,7 +973,7 @@ void MainFrame::syncControls()
     m_panel->setAntCount(static_cast<int>(m_world.ants().size()));
     m_panel->setSpeed(speed);
     m_panel->setStepExponent(step);
-    m_panel->setCellSize(m_canvas->cellSize());
+    m_panel->setScale(m_canvas->scale(), m_canvas->maxShrink());
     m_panel->setShowGrid(m_canvas->showGrid());
     m_panel->setWrap(torus);
     if (!unbounded)
@@ -999,9 +1013,9 @@ void MainFrame::updateStatusBar(bool force)
     }
     m_lastStatusUpdate = now;
 
-    const bool        running  = m_runner.isRunning();
-    const core::Speed speed    = m_runner.speed();
-    const int         cellSize = m_canvas->cellSize();
+    const bool          running = m_runner.isRunning();
+    const core::Speed   speed   = m_runner.speed();
+    const render::Scale scale   = m_canvas->scale();
 
     // Only the target until a rate has been measured.
     std::string speedText = core::toString(speed);
@@ -1024,9 +1038,9 @@ void MainFrame::updateStatusBar(bool force)
     }
 
     std::string viewText = m_hovered ? std::format("({}, {})", m_hovered->x, m_hovered->y) : "–";
-    viewText += std::format(" · {} px", cellSize);
+    viewText += std::format(" · {}", render::toString(scale));
     const render::RenderStyle& style = m_canvas->style();
-    if (style.showGrid && !style.gridVisibleAt(cellSize))
+    if (style.showGrid && !style.gridVisibleAt(scale))
     {
         viewText += std::format(" · grid hidden < {} px", style.minCellSizeForGrid);
     }

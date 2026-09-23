@@ -17,6 +17,7 @@
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
 #include "wxLife/core/Types.h"
+#include "wxLife/render/Types.h"
 #include "wxLife/render/Viewport.h"
 #include "wxLife/ui/CommandIds.h"
 #include "wxLife/ui/Defaults.h"
@@ -209,15 +210,48 @@ unsigned ControlPanel::stepExponent() const
     return static_cast<unsigned>(std::max(m_stepExponent->GetValue(), 0));
 }
 
-void ControlPanel::setCellSize(int px)
+void ControlPanel::setScale(render::Scale scale, unsigned maxShrink)
 {
-    m_cellSizeSpin->SetValue(px);
-    m_cellSizeSlider->SetValue(static_cast<int>(render::nearestZoomStep(px)));
+    m_scale = scale;
+    // The lower end follows the limit, which changes with the world and the canvas; a view zoomed
+    // out further than that still finds its own place.
+    const int lowest = -static_cast<int>(std::max(maxShrink, scale.shrink));
+    if (m_cellSizeSlider->GetMin() != lowest)
+    {
+        m_cellSizeSlider->SetRange(lowest, m_cellSizeSlider->GetMax());
+    }
+    m_cellSizeSlider->SetValue(scale.zoomedOut()
+                                   ? -static_cast<int>(scale.shrink)
+                                   : static_cast<int>(render::nearestZoomStep(scale.cellSize)));
+    showScale();
 }
 
-int ControlPanel::cellSize() const
+render::Scale ControlPanel::scale() const
 {
-    return m_cellSizeSpin->GetValue();
+    return m_scale;
+}
+
+void ControlPanel::showScale()
+{
+    const bool zoomedOut = m_scale.zoomedOut();
+    bool       relayout  = m_cellSizeSpin->IsShown() == zoomedOut;
+    if (zoomedOut)
+    {
+        const wxString text = toWx(render::toString(m_scale));
+        relayout            = relayout || text != m_scaleText->GetLabelText();
+        m_scaleText->SetLabelText(text);
+    }
+    else
+    {
+        m_cellSizeSpin->SetValue(m_scale.cellSize);
+    }
+    if (relayout)  // another control, or a text of another width
+    {
+        m_cellSizeSpin->Show(!zoomedOut);
+        m_cellSizeUnit->Show(!zoomedOut);
+        m_scaleText->Show(zoomedOut);
+        Layout();
+    }
 }
 
 void ControlPanel::setShowGrid(bool show)
@@ -390,29 +424,37 @@ void ControlPanel::addViewGroup(wxSizer& column)
 
     m_cellSizeSlider = new wxSlider(box, wxID_ANY, 0, 0, lastZoomStep);
     m_cellSizeSpin = makeSpin(box, render::kMinCellSize, render::kMaxCellSize, defaults::kCellSize);
+    m_cellSizeUnit = new wxStaticText(box, wxID_ANY, "px");
+    m_scaleText    = new wxStaticText(box, wxID_ANY, wxString());
+    m_scale        = {.cellSize = defaults::kCellSize};
     auto* fit      = new wxButton(box, wxID_ANY, "Fit");
     auto* center   = new wxButton(box, wxID_ANY, "Center");
     m_showGrid     = new wxCheckBox(box, wxID_ANY, "Grid lines");
     m_cellSizeSlider->SetToolTip("Cell size in screen pixels");
 
-    // The slider moves along render::kZoomSteps; the spin control takes any size in between.
+    // The slider moves along the zoom ladder; the spin control takes any size in between from
+    // 1 px on.
     m_cellSizeSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
-        m_cellSizeSpin->SetValue(
-            render::kZoomSteps.at(static_cast<std::size_t>(m_cellSizeSlider->GetValue())));
+        const int place = m_cellSizeSlider->GetValue();
+        m_scale =
+            place < 0
+                ? render::Scale{.shrink = static_cast<unsigned>(-place)}
+                : render::Scale{.cellSize = render::kZoomSteps.at(static_cast<std::size_t>(place))};
+        showScale();
         emitCommand(*m_cellSizeSlider, ID_CELL_SIZE_CHANGED);
     });
     m_cellSizeSpin->Bind(wxEVT_SPINCTRL, [this](wxSpinEvent&) {
-        m_cellSizeSlider->SetValue(
-            static_cast<int>(render::nearestZoomStep(m_cellSizeSpin->GetValue())));
+        m_scale = {.cellSize = m_cellSizeSpin->GetValue()};
+        m_cellSizeSlider->SetValue(static_cast<int>(render::nearestZoomStep(m_scale.cellSize)));
         emitCommand(*m_cellSizeSpin, ID_CELL_SIZE_CHANGED);
     });
     sendOn(*fit, wxEVT_BUTTON, ID_ZOOM_FIT);
     sendOn(*center, wxEVT_BUTTON, ID_CENTER_VIEW);
     sendOn(*m_showGrid, wxEVT_CHECKBOX, ID_TOGGLE_GRID);
 
-    group->Add(
-        stretchRow(m_cellSizeSlider, {m_cellSizeSpin, new wxStaticText(box, wxID_ANY, "px")}),
-        rowFlags());
+    group->Add(stretchRow(m_cellSizeSlider, {m_cellSizeSpin, m_cellSizeUnit, m_scaleText}),
+               rowFlags());
+    m_scaleText->Hide();
     group->Add(buttonGrid({fit, center}), rowFlags());
     group->Add(m_showGrid, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));

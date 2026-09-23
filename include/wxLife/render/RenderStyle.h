@@ -19,9 +19,10 @@ struct RenderStyle
     /// Every n-th line uses gridLineMajor, also where it crosses a minor line. 0: no major lines.
     int majorGridEvery = 10;
 
-    [[nodiscard]] constexpr bool gridVisibleAt(int cellSize) const noexcept
+    /// Never below 1 px.
+    [[nodiscard]] constexpr bool gridVisibleAt(Scale scale) const noexcept
     {
-        return showGrid && cellSize >= minCellSizeForGrid;
+        return showGrid && !scale.zoomedOut() && scale.cellSize >= minCellSizeForGrid;
     }
 };
 
