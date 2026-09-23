@@ -25,7 +25,7 @@ All numbers below were measured on the development machine unless marked otherwi
 | render/  Types, Viewport, PixelBuffer, RenderStyle, Rasterizer,          |
 |          Thumbnail                                                       |
 | core/    Types, Line, Rule, Ant, Grid, Random, ParallelBands, Stepper,   |
-|          ReferenceStepper, StepKernel, BandedStepper, World,             |
+|          ReferenceStepper, StepKernel, BandedStepper, World, HashLife,   |
 |          WorldLimits, Speed, Pacer, Format, Pattern, PatternSetup,       |
 |          Demo, EmbeddedFile (+ the generated EmbeddedPatterns.cpp)       |
 |                                             lib wxLife_lib (+ Threads)  |
@@ -197,6 +197,49 @@ a prototype, even 2 bands were faster than 1 (see Extension points below).
   has closed, and until then the status bar shows only the target.
 
 The pacer and the meter take the time as an argument, so their tests never sleep.
+
+## HashLife (`core`)
+
+`HashLife` (`wxLife/core/HashLife.h`) runs a B/S rule on an unbounded plane with Bill Gosper's
+algorithm. It is the engine behind the unbounded worlds the UI will offer; so far it stands on its own
+and only the tests use it.
+
+**The quadtree.** A node of level k is a 2^k × 2^k square: four children one level down (NW, NE, SW,
+SE), or a single cell at level 0. Nodes are hash-consed, so each distinct square exists once and is
+never changed; empty space and repeated structure cost almost nothing. Positions are 64-bit, with
+(0, 0) at the centre of the root.
+- Nodes are numbered with 32-bit ids and stored in chunks of 65,536 that are reserved up front and never
+  move. Ids 0 and 1 are the dead and the live cell.
+- An open-addressing hash table finds a node by its four children.
+- Each node carries its population, so empty regions are skipped and the total is always known.
+
+**A step.** Each node remembers its *result*: its centre half, advanced 2^min(j, k - 2) generations
+for the current step size 2^j. `successor()` builds it from the nine overlapping squares one level
+down: their results, then either their results again (a full step) or their centres (a smaller one).
+Level 2 is the base case, a 65,536-entry table from 4 × 4 cells to the centre 2 × 2 one generation on.
+- Before a step of 2^j generations, the root grows until it is at least level j + 3 with every live
+  cell in its centre quarter. A pattern can grow one cell per generation (Seeds and Replicator do), so
+  this is what guarantees that the result, the centre half, holds everything the step makes.
+- Results depend on j, so changing the step size forgets them all.
+- Afterwards the root shrinks back while the pattern fits a smaller one.
+- The universe ends at level 62. A pattern that drifts 2^59 cells from the centre stops with
+  `UNIVERSE_EDGE`; a glider needs 2^61 generations for that.
+
+**Memory.** The memory budget sets the most nodes there may be. When three quarters are in use,
+`collectGarbage()` keeps what the root needs, moves the survivors down in id order (children are
+always older than their parents, so one pass renumbers everything) and forgets every result. A step
+that runs out of nodes throws internally, is undone, collects and tries once more; then it reports
+`OUT_OF_MEMORY` and nothing has changed, and a smaller step may still fit.
+
+**Editing and reading.** `setCells()` builds a quadtree of the new cells and unites it with the
+plane (or subtracts it, to erase). `forEachBlock()` visits the 2^s × 2^s blocks that hold a live cell
+in a rectangle, skipping empty nodes, so a renderer showing 2^s cells per pixel costs one call per lit
+pixel. `bounds()` finds the extreme live cells, remembering each shared node's answer.
+
+**What it buys.** On this machine (Release), the Primer reaches generation 1,245,184 in 3.7 s. Its
+1,272 output spaceships are then exactly the primes up to 10,369, where a bounded world goes wrong
+after 67. The Gosper gun jumps 2^20 generations in 5 ms. Chaotic soups gain nothing: for them the
+dense engine is faster.
 
 ## Patterns and demos (`core`, `DemoDialog`)
 
@@ -516,6 +559,12 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
   to 100, and 1500 random scenes, each with up to three ants. The reference gains one branch for them —
   an ant colours the body of its cell but never a grid line — so the overlay, its clipping and both
   paint paths are covered by the same oracle. Hand-drawn text-art frames cover the special cases.
+- **`HashLifeTest`** compares HashLife cell for cell with the dense engine on random soups under seven
+  rules, including Seeds and Replicator, which grow at the speed of light, after single and 2^j steps.
+  It also checks the textbook facts an unbounded plane gives: the R-pentomino's 116 cells at 1103, the
+  acorn's 633 at 5206, the Gosper gun's population after 2^20 generations, and the Primer's first 95
+  primes read off its output spaceships. Further tests cover positions near 2^60, the edge of the
+  universe, running out of memory and garbage collection.
 - **`PatternTest`** reads RLE and plaintext text, including the tolerances real files need (CRLF, runs
   split by white space and line ends, a missing `!`, every rule spelling), and every error with its line.
   **`PatternSetupTest`** covers the demo and file setups, including the margins shrinking to the budget.
@@ -557,7 +606,7 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
 | Other rule families (Generations, Larger than Life) | Only the steppers interpret a `Rule`; the rest of the code only parses, prints and compares it. `Cell` is a byte. | Make `Rule` a `std::variant` and give each family its own stepper, plus a case in `Rule::toString()`, `findPreset()` and the preset list. The rasterizer would need colours for the extra states. |
 | More automata (other turmites, multi-state ants) | `Automaton`, `kAutomata` and the `default`-less switch in `World::step()`; `wxLife/core/Ant.h` holds the ant's own rule | Add an enum value and a `kAutomata` entry; `-Wswitch` then points at the four switches that need a case: `toString(Automaton)`, `World::step()`, and `worldText()` and `automatonMenuItem()` in `src/ui/MainFrame.cpp`. The panel's choice is built from `kAutomata`, so it needs no change. Multi-state cells would additionally break the binary assumptions listed in the row above. With a third automaton it is time to extract an interface from `World` instead of widening the switch. |
 | Other topologies (cylinder, Klein bottle) | `Topology` and `kTopologies`. `-Wswitch` lists the `core` code that needs a case: `toString(Topology)`, `Grid::updateBorder()` and the `alive` lambda in `ReferenceStepper::step()`. | Add an enum value, a `kTopologies` entry and a copy rule; `StepperTest` and `WorldTest` then cover it. The Wrap Edges toggle in `MainFrame` would become a choice. |
-| Sparse or infinite worlds, HashLife | The UI uses only `World`'s public interface | Extract an interface from `World` once a second implementation exists. `Rasterizer::render()` takes the dense `Grid` from `World::cells()`, so it would read cells through the new interface too. `Viewport` would need an unbounded extent. It would bring the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and let the prime calculators run without their streams hitting an edge; `readPattern()` would then need macrocell files. |
+| Unbounded worlds in the UI | `HashLife`, tested on its own; the UI uses only `World`'s public interface | Extract an interface from `World` with a dense and a HashLife implementation. `Rasterizer::render()` takes the dense `Grid` from `World::cells()`, so it would read cells through the new interface too. `Viewport` would need an unbounded extent. It would bring the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and let the prime calculators run without their streams hitting an edge; `readPattern()` would then need macrocell files. |
 | Zooming out below 1 px, a minimap | `Viewport` (`int` cell size) and `Rasterizer` | Replace the cell size with a scale type, and add a downsampling path. |
 | More demos | `patterns/`, `demo_patterns` in `src/CMakeLists.txt`, `kDemos` in `src/core/Demo.cpp` | Add the file, list it, and add a `Demo`; `DemoTest` checks the rest. `patterns/README.md` has the steps. |
 | Saving patterns, more file formats | `readPattern()`, `MainFrame::openPatternFile()` | An RLE writer next to the reader and File → Save. Life 1.06 would be a third reader behind the same format check. |

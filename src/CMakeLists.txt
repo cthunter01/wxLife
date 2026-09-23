@@ -27,7 +27,7 @@ add_custom_command(OUTPUT ${embedded_patterns}
 set_source_files_properties(${embedded_patterns} PROPERTIES SKIP_LINTING ON)
 
 add_library(wxLife_lib STATIC
-    core/BandedStepper.cpp core/Demo.cpp core/Format.cpp core/Grid.cpp core/Pacer.cpp
+    core/BandedStepper.cpp core/Demo.cpp core/Format.cpp core/Grid.cpp core/HashLife.cpp core/Pacer.cpp
     core/ParallelBands.cpp core/Pattern.cpp core/PatternSetup.cpp core/ReferenceStepper.cpp core/Rule.cpp
     core/Speed.cpp core/StepKernel.cpp core/Stepper.cpp core/World.cpp core/WorldLimits.cpp
     ${embedded_patterns}
@@ -37,10 +37,11 @@ target_include_directories(wxLife_lib PUBLIC ${PROJECT_SOURCE_DIR}/include)
 target_link_libraries(wxLife_lib PUBLIC Threads::Threads)
 wxLife_configure_target(wxLife_lib)
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
-    # The stepping loop and the rasterizer are optimised in every configuration, so Debug builds stay
-    # interactive: unoptimised, a maximised 4K canvas takes up to 90 ms per frame. Not with MSVC, whose
+    # The stepping loop, HashLife and the rasterizer are optimised in every configuration, so Debug builds
+    # stay interactive: unoptimised, a maximised 4K canvas takes up to 90 ms per frame. Not with MSVC, whose
     # Debug runtime checks (/RTC1) cannot be combined with /O2.
-    set_source_files_properties(core/StepKernel.cpp render/Rasterizer.cpp PROPERTIES COMPILE_OPTIONS -O3)
+    set_source_files_properties(core/StepKernel.cpp core/HashLife.cpp render/Rasterizer.cpp
+                                PROPERTIES COMPILE_OPTIONS -O3)
 endif()
 if(WXLIFE_KERNEL_CLONES)
     set_source_files_properties(core/StepKernel.cpp PROPERTIES COMPILE_DEFINITIONS WXLIFE_KERNEL_CLONES)

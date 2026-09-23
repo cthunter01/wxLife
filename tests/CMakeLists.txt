@@ -1,6 +1,6 @@
 set(test_sources
-    core/AntTests.cpp core/DemoTests.cpp core/FormatTests.cpp core/GridTests.cpp core/LineTests.cpp
-    core/PacerTests.cpp core/ParallelBandsTests.cpp core/PatternSetupTests.cpp core/PatternTests.cpp
+    core/AntTests.cpp core/DemoTests.cpp core/FormatTests.cpp core/GridTests.cpp core/HashLifeTests.cpp
+    core/LineTests.cpp core/PacerTests.cpp core/ParallelBandsTests.cpp core/PatternSetupTests.cpp core/PatternTests.cpp
     core/RandomTests.cpp core/RuleTests.cpp core/SpeedTests.cpp core/StepperTests.cpp
     core/WorldLimitsTests.cpp core/WorldTests.cpp
     render/RasterizerTests.cpp render/ThumbnailTests.cpp render/ViewportTests.cpp)
