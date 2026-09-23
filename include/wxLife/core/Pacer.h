@@ -33,6 +33,10 @@ public:
     /// Also drops accumulated debt.
     void                setSpeed(Speed speed) noexcept;
     [[nodiscard]] Speed speed() const noexcept;
+    /// Generations a step takes at once: 1, or 2^k in an unbounded world. The catch-up cap never
+    /// drops below one step, or a large step at a low rate would never come due.
+    void                       setStepSize(std::int64_t generations) noexcept;
+    [[nodiscard]] std::int64_t stepSize() const noexcept;
     /// Call when the simulation starts running.
     void restart(Clock::time_point now) noexcept;
     /// Adds the time since the last call to the debt and says how much of it this tick may pay.
@@ -42,6 +46,7 @@ public:
 
 private:
     Speed             m_speed{};
+    std::int64_t      m_stepSize = 1;
     Clock::time_point m_last;
     double            m_owed = 0.0;  ///< Fractional generations owed.
 };

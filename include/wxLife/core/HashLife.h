@@ -5,6 +5,7 @@
 #pragma once
 
 #include <array>
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -22,33 +23,12 @@
 namespace wxLife::core
 {
 
-/// A cell coordinate on the unbounded plane; (0, 0) is its centre.
-using UniverseCoord = std::int64_t;
-
-/// Cell position on the unbounded plane.
-struct UniversePos
-{
-    UniverseCoord x = 0;
-    UniverseCoord y = 0;
-
-    friend constexpr bool operator==(UniversePos, UniversePos) noexcept = default;
-};
-
-/// Half-open cell rectangle [x0, x1) × [y0, y1) on the unbounded plane.
-struct UniverseRect
-{
-    UniverseCoord x0 = 0, y0 = 0, x1 = 0, y1 = 0;
-
-    [[nodiscard]] constexpr bool empty() const noexcept { return x0 >= x1 || y0 >= y1; }
-
-    friend constexpr bool operator==(UniverseRect, UniverseRect) noexcept = default;
-};
-
 /// Why HashLife::step() could not advance.
 enum class HashLifeError : std::uint8_t
 {
     OUT_OF_MEMORY,  ///< The step needs more nodes than the memory budget allows.
     UNIVERSE_EDGE,  ///< The pattern would leave the part of the plane a step can reach.
+    CANCELLED,      ///< HashLifeStepOptions::cancel was set during the step.
 };
 
 /// Message for the user.
@@ -60,9 +40,22 @@ enum class HashLifeError : std::uint8_t
             return "The step needs more memory than the budget allows. A smaller step may fit.";
         case HashLifeError::UNIVERSE_EDGE:
             return "The pattern has reached the edge of the universe, 2^59 cells from its centre.";
+        case HashLifeError::CANCELLED:
+            return "The step was interrupted.";
     }
     std::unreachable();
 }
+
+/// How HashLife::step() may run; the options matter when it runs on a thread of its own.
+struct HashLifeStepOptions
+{
+    /// Checked while the step runs: once it is true, the step stops and reports CANCELLED.
+    const std::atomic<bool>* cancel = nullptr;
+    /// Whether the step may collect garbage when memory runs short. A step on a worker thread must
+    /// not, since readers on other threads would see the nodes move: it reports OUT_OF_MEMORY
+    /// instead, and the owner collects between steps.
+    bool collectGarbage = true;
+};
 
 /// A two-state B/S rule running on an unbounded plane with HashLife.
 ///
@@ -76,8 +69,12 @@ enum class HashLifeError : std::uint8_t
 /// thing that moves them. The memory budget caps the number of nodes: a step that would need more
 /// is undone, and the garbage is collected, before step() reports OUT_OF_MEMORY.
 ///
-/// @note Not thread-safe. Only reading cells may overlap with a step on another thread, and only
-///       when the reader uses a root that step() does not collect.
+/// @note One thread at a time may change the plane: step(), setCells(), setRule(), clear() and
+///       the garbage collection. While a step runs with collectGarbage off, other threads may
+///       read: population(), generation(), at(), bounds() and forEachBlock() see the plane as it
+///       was before the step, or after it once it has finished. A step writes only nodes nobody
+///       has seen yet and the remembered results, which readers never look at, and it publishes
+///       its new root atomically.
 class HashLife
 {
 public:
@@ -124,9 +121,11 @@ public:
     /// Every cell dead, generation 0, and all memory but the empty plane released.
     void clear();
 
-    /// Advances 2^exponent generations. On failure nothing changes.
+    /// Advances 2^exponent generations. On failure nothing changes; a cancelled step keeps the
+    /// results it has already worked out, so the next one is quicker.
     /// @pre exponent <= kMaxStepExponent
-    std::expected<void, HashLifeError> step(unsigned exponent);
+    std::expected<void, HashLifeError> step(unsigned                   exponent,
+                                            const HashLifeStepOptions& options = {});
 
     /// Calls `visit` with the top-left corner of every 2^level × 2^level block that holds a live
     /// cell and meets `area`, in no particular order. Blocks are aligned to multiples of 2^level,
@@ -139,8 +138,13 @@ public:
     [[nodiscard]] std::size_t nodeCount() const noexcept;
     /// The most nodes the memory budget allows.
     [[nodiscard]] std::size_t maxNodes() const noexcept;
+    /// Memory the nodes and their hash table take.
+    [[nodiscard]] std::uint64_t memoryBytes() const noexcept;
     /// Keeps the nodes the plane needs and drops the rest, remembered results included.
     void collectGarbage();
+    /// collectGarbage() once three quarters of the nodes are in use, unless the last collection
+    /// left the plane that full. step() calls it itself unless told not to.
+    void collectIfFull();
 
 private:
     using NodeId                       = std::uint32_t;
@@ -161,6 +165,9 @@ private:
 
     /// Thrown when the node budget runs out in the middle of building nodes.
     struct OutOfNodes
+    { };
+    /// Thrown when the cancel flag of the running step is set.
+    struct Cancelled
     { };
 
     [[nodiscard]] const Node& node(NodeId id) const noexcept;
@@ -185,7 +192,6 @@ private:
     /// The step itself. @return false if the pattern is too close to the edge of the universe.
     [[nodiscard]] bool advance(unsigned exponent);
     void               forgetResults() noexcept;
-    void               collectIfFull();
 
     using ExtremeMemo = std::unordered_map<NodeId, UniverseCoord>;
     /// The smallest (`low`) or largest coordinate along `axis` (0 = x, 1 = y) of a live cell of a
@@ -200,20 +206,23 @@ private:
     [[nodiscard]] NodeId subtract(NodeId a, NodeId b);
     CellCount            applyCells(std::vector<UniversePos> cells, Cell value);
 
-    Rule          m_rule;
-    std::uint64_t m_generation = 0;
+    Rule m_rule;
     /// 4 × 4 cells (bit y * 4 + x) to their centre 2 × 2 one generation later (bit
     /// (y - 1) * 2 + x - 1).
     std::array<std::uint8_t, 1U << 16> m_leafTable{};
 
-    std::vector<std::vector<Node>>    m_chunks;  ///< Reserved up front, so a chunk never moves.
+    /// One slot per chunk the budget allows, made once. A chunk is filled whole when its first
+    /// node is made and never moves, so readers never see a container change under them.
+    std::vector<std::vector<Node>>    m_chunks;
     std::size_t                       m_nodeCount            = 0;
     std::size_t                       m_maxNodes             = 0;
     std::size_t                       m_nodesAfterCollection = 0;  ///< For collectIfFull()
     std::vector<NodeId>               m_table;  ///< Open addressing; kNoNode marks a free slot.
     std::array<NodeId, kMaxLevel + 1> m_emptyNodes{};
-    unsigned                          m_resultExponent = 0;  ///< The step the results are for
-    NodeId                            m_root           = kNoNode;
+    unsigned                          m_resultExponent = 0;        ///< The step the results are for
+    const std::atomic<bool>*          m_cancel         = nullptr;  ///< The running step's flag
+    std::atomic<NodeId>               m_root{kNoNode};
+    std::atomic<std::uint64_t>        m_generation{0};
 };
 
 }  // namespace wxLife::core

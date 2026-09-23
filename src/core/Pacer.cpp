@@ -29,6 +29,16 @@ Speed GenerationPacer::speed() const noexcept
     return m_speed;
 }
 
+void GenerationPacer::setStepSize(std::int64_t generations) noexcept
+{
+    m_stepSize = std::max<std::int64_t>(generations, 1);
+}
+
+std::int64_t GenerationPacer::stepSize() const noexcept
+{
+    return m_stepSize;
+}
+
 void GenerationPacer::restart(Clock::time_point now) noexcept
 {
     m_last = now;
@@ -48,9 +58,10 @@ TickPlan GenerationPacer::plan(Clock::time_point now) noexcept
 
     // The cap drops debt after a stall (a modal dialog, a slow step), so no burst of catch-up steps
     // follows. It also lets the rate settle at what the machine manages when ticks run out of time.
-    const double rate    = m_speed.gensPerSecond;
-    const double maxDebt = (Seconds(kMaxCatchUp).count() * rate) + 1.0;
-    m_owed               = std::clamp(m_owed + (elapsed * rate), 0.0, maxDebt);
+    const double rate = m_speed.gensPerSecond;
+    const double maxDebt =
+        std::max((Seconds(kMaxCatchUp).count() * rate) + 1.0, static_cast<double>(m_stepSize));
+    m_owed = std::clamp(m_owed + (elapsed * rate), 0.0, maxDebt);
     // Whole generations only; the fraction stays owed.
     return {.maxGenerations = static_cast<std::int64_t>(m_owed), .timeBudget = kTickBudget};
 }

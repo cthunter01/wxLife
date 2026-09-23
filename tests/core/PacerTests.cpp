@@ -96,6 +96,23 @@ TEST(PacerTest, UnpaidDebtStaysCapped)
     EXPECT_LE(pacer.plan(kStart + 100 * 16ms).maxGenerations, 1);
 }
 
+TEST(PacerTest, ALargeStepComesDueEvenAtALowRate)
+{
+    // At 10 gen/s the catch-up cap is a quarter second's worth, 3.5 generations. A step of 64
+    // generations still comes due, after 6.4 s, because the cap never drops below one step.
+    GenerationPacer pacer({.gensPerSecond = 10});
+    pacer.setStepSize(64);
+    EXPECT_EQ(pacer.stepSize(), 64);
+    const Clock::time_point start{};
+    pacer.restart(start);
+    EXPECT_EQ(pacer.plan(start + 3s).maxGenerations, 30);
+    EXPECT_EQ(pacer.plan(start + 6s).maxGenerations, 60);
+    EXPECT_EQ(pacer.plan(start + 6400ms).maxGenerations, 64);
+    EXPECT_EQ(pacer.plan(start + 60s).maxGenerations, 64);  // and no more than one step
+    pacer.setStepSize(0);
+    EXPECT_EQ(pacer.stepSize(), 1);
+}
+
 TEST(PacerTest, SetSpeedAndRestartClearTheDebt)
 {
     GenerationPacer pacer(Speed{.gensPerSecond = 10, .unlimited = false});

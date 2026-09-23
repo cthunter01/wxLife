@@ -24,8 +24,6 @@ namespace wxLife::render
 namespace
 {
 
-using core::CellPos;
-using core::CellRect;
 using core::Coord;
 using core::Extent;
 
@@ -35,17 +33,17 @@ std::string text(PixelPoint p)
     return std::format("({}, {})", p.x, p.y);
 }
 
-std::string text(CellPos c)
+std::string text(core::UniversePos c)
 {
     return std::format("({}, {})", c.x, c.y);
 }
 
-std::string text(std::optional<CellPos> c)
+std::string text(std::optional<core::UniversePos> c)
 {
     return c ? text(*c) : "outside";
 }
 
-std::string text(CellRect r)
+std::string text(core::UniverseRect r)
 {
     return r.empty() ? "empty" : std::format("[{}, {}) x [{}, {})", r.x0, r.x1, r.y0, r.y1);
 }
@@ -128,7 +126,7 @@ Span bruteForceVisible(Pixel offset, Pixel canvas, Coord side, int cellSize)
 }
 
 // The cell whose pixel square contains the canvas point, found by trying every cell.
-std::optional<CellPos> bruteForceCellAt(const Viewport& viewport, PixelPoint p)
+std::optional<core::UniversePos> bruteForceCellAt(const Viewport& viewport, PixelPoint p)
 {
     const int  size = viewport.cellSize();
     const auto axis = [size](Pixel offset, Pixel point, Coord side) -> std::optional<Coord> {
@@ -144,7 +142,7 @@ std::optional<CellPos> bruteForceCellAt(const Viewport& viewport, PixelPoint p)
     };
     const auto x = axis(viewport.offset().x, p.x, viewport.worldExtent().width);
     const auto y = axis(viewport.offset().y, p.y, viewport.worldExtent().height);
-    return x && y ? std::optional(CellPos{.x = *x, .y = *y}) : std::nullopt;
+    return x && y ? std::optional(core::UniversePos{.x = *x, .y = *y}) : std::nullopt;
 }
 
 TEST(ViewportTest, StartsEmpty)
@@ -207,8 +205,8 @@ TEST(ViewportTest, AnchoredZoomKeepsThePointUnderTheAnchor)
                 Viewport viewport =
                     makeViewport({.width = 100'000, .height = 100'000}, canvas, from);
                 viewport.centerOn({.x = 50'000, .y = 49'000});
-                const std::optional<CellPos> cell  = viewport.cellAt(anchor);
-                const WorldPoint             point = worldAt(viewport, anchor);
+                const std::optional<core::UniversePos> cell  = viewport.cellAt(anchor);
+                const WorldPoint                       point = worldAt(viewport, anchor);
                 ASSERT_TRUE(cell);
 
                 viewport.setCellSize(to, anchor);
@@ -327,8 +325,8 @@ TEST(ViewportTest, ZoomingInFromOnePixelKeepsTheAnchorAtTheCellCentre)
     Viewport viewport =
         makeViewport({.width = 10'000, .height = 10'000}, {.width = 800, .height = 600}, 1);
     viewport.centerOn({.x = 5000, .y = 5000});
-    const PixelPoint             anchor{.x = 537, .y = 300};
-    const std::optional<CellPos> cell = viewport.cellAt(anchor);
+    const PixelPoint                       anchor{.x = 537, .y = 300};
+    const std::optional<core::UniversePos> cell = viewport.cellAt(anchor);
     ASSERT_TRUE(cell);
     while (viewport.cellSize() < kMaxCellSize)
     {
@@ -346,14 +344,14 @@ TEST(ViewportTest, ACentredAxisDoesNotEndTheOtherAxisRun)
     // the test above.
     Viewport viewport =
         makeViewport({.width = 100, .height = 1000}, {.width = 2000, .height = 1000}, 1);
-    const PixelPoint             anchor{.x = 1000, .y = 500};
-    const std::optional<CellPos> cell = viewport.cellAt(anchor);
+    const PixelPoint                       anchor{.x = 1000, .y = 500};
+    const std::optional<core::UniversePos> cell = viewport.cellAt(anchor);
     ASSERT_EQ(text(cell), "(50, 500)");
     while (viewport.cellSize() < kMaxCellSize)
     {
         viewport.zoomBy(1, anchor);
     }
-    const std::optional<CellPos> now = viewport.cellAt(anchor);
+    const std::optional<core::UniversePos> now = viewport.cellAt(anchor);
     ASSERT_TRUE(now);
     EXPECT_EQ(now.value().y, cell.value().y);
     EXPECT_EQ(anchor.y - viewport.cellOrigin(now.value()).y, 50);
@@ -370,7 +368,7 @@ TEST(ViewportTest, OtherCameraChangesEndARunOfZooms)
         viewport.centerOn({.x = 5000, .y = 5000});
         viewport.zoomBy(1, anchor);
         move(viewport);
-        const std::optional<CellPos> cell = viewport.cellAt(anchor);
+        const std::optional<core::UniversePos> cell = viewport.cellAt(anchor);
         viewport.zoomBy(1, anchor);
         EXPECT_EQ(text(viewport.cellAt(anchor)), text(cell)) << name;
     };
@@ -390,7 +388,7 @@ TEST(ViewportTest, OtherCameraChangesEndARunOfZooms)
     const PixelPoint nearEdge{.x = 450, .y = 300};
     edge.zoomBy(-1, nearEdge);
     ASSERT_EQ(text(edge.offset()), "(0, 0)");
-    const std::optional<CellPos> cell = edge.cellAt(nearEdge);
+    const std::optional<core::UniversePos> cell = edge.cellAt(nearEdge);
     edge.zoomBy(1, nearEdge);
     EXPECT_EQ(text(edge.cellAt(nearEdge)), text(cell));
 }
@@ -533,11 +531,11 @@ TEST(ViewportTest, CellOriginAndCellAtAreInverses)
         {
             continue;
         }
-        const int        size = viewport.cellSize();
-        const CellPos    cell{.x = static_cast<Coord>(pick(rng, 0, world.width - 1)),
-                              .y = static_cast<Coord>(pick(rng, 0, world.height - 1))};
-        const PixelPoint origin = viewport.cellOrigin(cell);
-        const PixelPoint last{.x = origin.x + size - 1, .y = origin.y + size - 1};
+        const int               size = viewport.cellSize();
+        const core::UniversePos cell{.x = pick(rng, 0, world.width - 1),
+                                     .y = pick(rng, 0, world.height - 1)};
+        const PixelPoint        origin = viewport.cellOrigin(cell);
+        const PixelPoint        last{.x = origin.x + size - 1, .y = origin.y + size - 1};
         EXPECT_EQ(text(viewport.cellAt(origin)), text(cell));
         EXPECT_EQ(text(viewport.cellAt(last)), text(cell));
         EXPECT_EQ(text(viewport.cellAtClamped(last)), text(cell));
@@ -556,9 +554,10 @@ TEST(ViewportTest, VisibleCellsMatchBruteForce)
         const Extent    world    = viewport.worldExtent();
         const Span      xs =
             bruteForceVisible(viewport.offset().x, canvas.width, world.width, viewport.cellSize());
-        const Span     ys = bruteForceVisible(viewport.offset().y, canvas.height, world.height,
-                                              viewport.cellSize());
-        const CellRect expected{.x0 = xs.first, .y0 = ys.first, .x1 = xs.end, .y1 = ys.end};
+        const Span ys = bruteForceVisible(viewport.offset().y, canvas.height, world.height,
+                                          viewport.cellSize());
+        const core::UniverseRect expected{
+            .x0 = xs.first, .y0 = ys.first, .x1 = xs.end, .y1 = ys.end};
         ASSERT_EQ(text(viewport.visibleCells()), text(expected))
             << "world " << world.width << "x" << world.height << ", canvas " << canvas.width << "x"
             << canvas.height << ", offset " << text(viewport.offset()) << ", cell size "
@@ -717,8 +716,8 @@ TEST(ViewportTest, ZoomByIsAnchored)
     Viewport viewport =
         makeViewport({.width = 10'000, .height = 10'000}, {.width = 800, .height = 600}, 7);
     viewport.centerOn({.x = 5000, .y = 5000});
-    const PixelPoint             anchor{.x = 123, .y = 456};
-    const std::optional<CellPos> before = viewport.cellAt(anchor);
+    const PixelPoint                       anchor{.x = 123, .y = 456};
+    const std::optional<core::UniversePos> before = viewport.cellAt(anchor);
     viewport.zoomBy(4, anchor);
     EXPECT_EQ(viewport.cellSize(), 16);
     EXPECT_EQ(text(viewport.cellAt(anchor)), text(before));
@@ -782,6 +781,59 @@ TEST(ViewportTest, NegativeCanvasSidesCountAsZero)
         makeViewport({.width = 10, .height = 10}, {.width = -5, .height = -7}, 4);
     EXPECT_EQ(viewport.canvasSize(), (PixelSize{0, 0}));
     EXPECT_EQ(text(viewport.visibleCells()), "empty");
+}
+
+TEST(ViewportTest, AnUnboundedWorldHasNoEdges)
+{
+    Viewport viewport;
+    viewport.setUnbounded();
+    viewport.setCanvasSize({.width = 200, .height = 100});
+    viewport.setCellSize(10, {});
+    EXPECT_TRUE(viewport.unbounded());
+    EXPECT_EQ(viewport.worldExtent(), (core::Extent{}));
+
+    // Anywhere is a cell, negative coordinates included, and nothing is clipped.
+    viewport.centerOn({.x = -1000, .y = 5'000'000});
+    EXPECT_EQ(text(viewport.cellAt({100, 50})), "(-1000, 5000000)");
+    EXPECT_EQ(text(viewport.cellAt({-5000, -5000})), "(-1510, 4999495)");
+    EXPECT_EQ(text(viewport.cellAtClamped({-5000, -5000})), "(-1510, 4999495)");
+    // The half-visible cells at both ends count too.
+    EXPECT_EQ(text(viewport.visibleCells()), "[-1010, -989) x [4999995, 5000006)");
+
+    // Fitting far-away cells works as anywhere else.
+    constexpr core::UniverseCoord kFar = core::UniverseCoord{1} << 40;
+    viewport.fitCells({.x0 = kFar, .y0 = -kFar, .x1 = kFar + 20, .y1 = -kFar + 10});
+    EXPECT_EQ(viewport.cellSize(), 10);
+    EXPECT_EQ(text(viewport.cellAt({100, 50})),
+              text(core::UniversePos{.x = kFar + 10, .y = -kFar + 5}));
+    // fitWorld() has no whole to fit and keeps the view.
+    const PixelPoint before = viewport.offset();
+    viewport.fitWorld();
+    EXPECT_EQ(text(viewport.offset()), text(before));
+}
+
+TEST(ViewportTest, AnUnboundedViewStopsAtItsReach)
+{
+    Viewport viewport;
+    viewport.setUnbounded();
+    viewport.setCanvasSize({.width = 200, .height = 100});
+    viewport.setCellSize(100, {});
+    // Beyond the reach, so the view stops there instead of overflowing: at the limit, or within a
+    // cell of it, since centring works in whole cells.
+    viewport.centerOn({.x = core::UniverseCoord{1} << 60, .y = -(core::UniverseCoord{1} << 60)});
+    EXPECT_EQ(viewport.offset().x, Viewport::kUnboundedReach - 200);
+    EXPECT_GE(viewport.offset().y, -Viewport::kUnboundedReach);
+    EXPECT_LT(viewport.offset().y, -Viewport::kUnboundedReach + 100);
+    viewport.panBy(Viewport::kUnboundedReach, 0);
+    EXPECT_EQ(viewport.offset().x, Viewport::kUnboundedReach - 200);
+    // Zooming at the far edge stays exact and inside the reach.
+    viewport.zoomBy(-5, {.x = 0, .y = 0});
+    EXPECT_LE(viewport.offset().x, Viewport::kUnboundedReach - 200);
+
+    // A fixed-size world again: clamped into it at once.
+    viewport.setWorldExtent({.width = 10, .height = 10});
+    EXPECT_FALSE(viewport.unbounded());
+    EXPECT_EQ(text(viewport.cellAt({-1, -1})), "outside");
 }
 
 }  // namespace

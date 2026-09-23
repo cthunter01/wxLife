@@ -32,6 +32,9 @@ wxMenuBar* buildMenuBar()
     simulation->Append(ID_FASTER, "&Faster\tCtrl+]");
     simulation->Append(ID_SLOWER, "S&lower\tCtrl+[");
     simulation->AppendCheckItem(ID_TOGGLE_MAX_SPEED, "&Max Speed\tCtrl+M");
+    // Unbounded worlds only: generations per step, 2^k.
+    simulation->Append(ID_LARGER_STEP, "Lar&ger Step\tF8");
+    simulation->Append(ID_SMALLER_STEP, "Smaller Ste&p\tF7");
     simulation->AppendSeparator();
     // The automaton decides whether the engine below it matters at all, so it comes first.
     simulation->AppendSubMenu(automaton, "&Automaton");

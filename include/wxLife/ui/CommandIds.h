@@ -23,6 +23,9 @@ enum CommandId : int  // NOLINT(cppcoreguidelines-use-enum-class,performance-enu
     ID_SLOWER,
     ID_TOGGLE_MAX_SPEED,
     ID_SPEED_CHANGED,  ///< Read ControlPanel::speed().
+    ID_LARGER_STEP,
+    ID_SMALLER_STEP,
+    ID_STEP_SIZE_CHANGED,  ///< Read ControlPanel::stepExponent().
     ID_AUTOMATON_LIFE,
     ID_AUTOMATON_ANT,
     ID_AUTOMATON_CHANGED,  ///< Read ControlPanel::selectedAutomaton().

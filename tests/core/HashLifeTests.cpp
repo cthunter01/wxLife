@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <set>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -76,6 +78,25 @@ void advance(HashLife& life, std::uint64_t generations)
             ASSERT_TRUE(life.step(bit).has_value()) << "step 2^" << bit;
         }
     }
+}
+
+// A random square of cells, half of them alive.
+std::vector<CellPos> soup(Coord side, std::uint64_t seed)
+{
+    SplitMix64           random(seed);
+    std::vector<CellPos> cells;
+    cells.reserve(static_cast<std::size_t>(side) * static_cast<std::size_t>(side));
+    for (Coord y = 0; y < side; ++y)
+    {
+        for (Coord x = 0; x < side; ++x)
+        {
+            if (random() % 2 == 0)
+            {
+                cells.push_back({.x = x, .y = y});
+            }
+        }
+    }
+    return cells;
 }
 
 static_assert(HashLife::supports(Rule{}));
@@ -383,21 +404,8 @@ TEST(HashLifeTest, APatternCanReachTheEdgeOfTheUniverse)
 TEST(HashLifeTest, RunningOutOfMemoryChangesNothing)
 {
     // The smallest budget still holds one chunk of nodes, far too few for a soup's long future.
-    HashLife             life(Rule{}, 0);
-    SplitMix64           random(3);
-    std::vector<CellPos> soup;
-    soup.reserve(std::size_t{64} * 64);
-    for (Coord y = 0; y < 64; ++y)
-    {
-        for (Coord x = 0; x < 64; ++x)
-        {
-            if (random() % 2 == 0)
-            {
-                soup.push_back({.x = x, .y = y});
-            }
-        }
-    }
-    life.setCells(soup, kAlive);
+    HashLife life(Rule{}, 0);
+    life.setCells(soup(64, 3), kAlive);
     const CellSet                            before = cellsOf(life);
     const std::expected<void, HashLifeError> result = life.step(12);
     ASSERT_FALSE(result.has_value());
@@ -407,6 +415,72 @@ TEST(HashLifeTest, RunningOutOfMemoryChangesNothing)
     EXPECT_LE(life.nodeCount(), life.maxNodes());
     // A small step still fits.
     EXPECT_TRUE(life.step(0).has_value());
+}
+
+TEST(HashLifeTest, ACancelledStepChangesNothing)
+{
+    HashLife life(Rule{}, kBudget);
+    life.setCells(soup(64, 5), kAlive);
+    const CellSet                            before = cellsOf(life);
+    std::atomic<bool>                        cancel{true};
+    const std::expected<void, HashLifeError> result = life.step(12, {.cancel = &cancel});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), HashLifeError::CANCELLED);
+    EXPECT_EQ(life.generation(), 0U);
+    EXPECT_EQ(cellsOf(life), before);
+    cancel = false;
+    EXPECT_TRUE(life.step(4, {.cancel = &cancel}).has_value());
+    EXPECT_EQ(life.generation(), 16U);
+}
+
+TEST(HashLifeTest, AStepThatMustNotCollectLeavesThatToTheOwner)
+{
+    HashLife life(Rule{}, 0);  // the smallest budget
+    life.setCells(soup(64, 3), kAlive);
+    const CellSet                            before = cellsOf(life);
+    const std::expected<void, HashLifeError> result = life.step(12, {.collectGarbage = false});
+    ASSERT_FALSE(result.has_value());
+    EXPECT_EQ(result.error(), HashLifeError::OUT_OF_MEMORY);
+    EXPECT_EQ(cellsOf(life), before);
+    // The failed step's nodes are still there until the owner collects them.
+    const std::size_t full = life.nodeCount();
+    life.collectGarbage();
+    EXPECT_LT(life.nodeCount(), full);
+    EXPECT_TRUE(life.step(0, {.collectGarbage = false}).has_value());
+}
+
+TEST(HashLifeTest, OtherThreadsCanDrawWhileAStepRuns)
+{
+    // As the UI will: one thread steps without collecting, another reads the plane as it was
+    // before each step or after it. The reader must only ever see whole generations. Under
+    // ThreadSanitizer (the tsan preset) this also checks that no memory is shared unsafely.
+    HashLife life(Rule{}, kBudget);
+    life.setCells(soup(48, 11), kAlive);
+    constexpr UniverseRect     kEverything{.x0 = -4096, .y0 = -4096, .x1 = 4096, .y1 = 4096};
+    std::vector<std::uint64_t> populations{life.population()};
+    std::atomic<bool>          done{false};
+    std::vector<std::uint64_t> seen;
+    std::thread                reader([&] {
+        while (!done)
+        {
+            std::uint64_t cells = 0;
+            life.forEachBlock(kEverything, 0, [&](UniversePos) { ++cells; });
+            seen.push_back(cells);
+            static_cast<void>(life.bounds());
+        }
+    });
+    for (int g = 0; g < 200; ++g)
+    {
+        ASSERT_TRUE(life.step(0, {.collectGarbage = false}).has_value());
+        populations.push_back(life.population());
+    }
+    done = true;
+    reader.join();
+    ASSERT_FALSE(seen.empty());
+    for (const std::uint64_t cells : seen)
+    {
+        EXPECT_TRUE(std::ranges::contains(populations, cells)) << cells << " cells";
+    }
 }
 
 TEST(HashLifeTest, GarbageCollectionKeepsThePattern)

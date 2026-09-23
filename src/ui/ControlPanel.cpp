@@ -20,6 +20,7 @@
 #include "wxLife/render/Viewport.h"
 #include "wxLife/ui/CommandIds.h"
 #include "wxLife/ui/Defaults.h"
+#include "wxLife/ui/SimulationRunner.h"
 #include "wxLife/ui/Theme.h"
 #include "wxLife/ui/WxConvert.h"
 
@@ -91,12 +92,14 @@ ControlPanel::ControlPanel(wxWindow* parent)
     SetSizer(column);
     // Vertical only, so short screens can reach every group.
     SetScrollRate(0, FromDIP(kScrollStepDip));
+    setStepExponent(0);
+    updateEnabled();
 
     // GTK changes these controls under the wheel even without the focus, so scrolling the panel
     // would silently change values. A consumed wheel event never reaches GTK.
     for (wxWindow* control : std::initializer_list<wxWindow*>{
-             m_automaton, m_density, m_antCount, m_speedSlider, m_speedSpin, m_cellSizeSlider,
-             m_cellSizeSpin, m_rulePreset})
+             m_automaton, m_density, m_antCount, m_speedSlider, m_speedSpin, m_stepExponent,
+             m_cellSizeSlider, m_cellSizeSpin, m_rulePreset})
     {
         control->Bind(wxEVT_MOUSEWHEEL, [control](wxMouseEvent& event) {
             if (control->HasFocus())
@@ -118,13 +121,30 @@ void ControlPanel::setAutomaton(core::Automaton automaton)
 {
     m_automaton->SetSelection(static_cast<int>(std::ranges::distance(
         core::kAutomata.begin(), std::ranges::find(core::kAutomata, automaton))));
+    m_shownAutomaton = automaton;
+    updateEnabled();
+}
 
-    // Each automaton greys out what only the other one uses, so a dead control is visible as such.
-    const bool life = automaton == core::Automaton::LIFE;
+void ControlPanel::setWorldKind(core::WorldKind kind)
+{
+    m_shownKind = kind;
+    updateEnabled();
+}
+
+void ControlPanel::updateEnabled()
+{
+    // Each automaton greys out what only the other one uses, and so does each kind of world, so a
+    // dead control is visible as such.
+    const bool life      = m_shownAutomaton == core::Automaton::LIFE;
+    const bool unbounded = m_shownKind == core::WorldKind::UNBOUNDED;
+    m_automaton->Enable(!unbounded);  // a plane runs only Life
     m_antCount->Enable(!life);
     m_resetAnts->Enable(!life);
-    m_wrap->Enable(life);  // the ant always wraps, whatever the topology says
+    m_wrap->Enable(life && !unbounded);  // the ant always wraps; a plane has no edges
     m_ruleBox->Enable(life);
+    m_stepLabel->Enable(unbounded);
+    m_stepExponent->Enable(unbounded);
+    m_stepSize->Enable(unbounded);
 }
 
 core::Automaton ControlPanel::selectedAutomaton() const
@@ -167,6 +187,28 @@ core::Speed ControlPanel::speed() const
     return {.gensPerSecond = m_speedSpin->GetValue(), .unlimited = m_maxSpeed->GetValue()};
 }
 
+void ControlPanel::setStepExponent(unsigned exponent)
+{
+    m_stepExponent->SetValue(static_cast<int>(exponent));
+    // Exact counts while they stay readable; powers of two beyond.
+    constexpr unsigned kLongestCount = 32;
+    const std::string  count         = exponent <= kLongestCount
+                                           ? core::formatCount(std::uint64_t{1} << exponent)
+                                           : std::format("2^{}", exponent);
+    const wxString     text =
+        toWx(std::format("{} generation{} per step", count, exponent == 0 ? "" : "s"));
+    if (text != m_stepSize->GetLabelText())
+    {
+        m_stepSize->SetLabelText(text);
+        Layout();
+    }
+}
+
+unsigned ControlPanel::stepExponent() const
+{
+    return static_cast<unsigned>(std::max(m_stepExponent->GetValue(), 0));
+}
+
 void ControlPanel::setCellSize(int px)
 {
     m_cellSizeSpin->SetValue(px);
@@ -190,9 +232,18 @@ void ControlPanel::setWrap(bool wrap)
 
 void ControlPanel::setWorldInfo(core::Extent extent, std::uint64_t bytes)
 {
-    const wxString text = toWx(std::format(
+    setWorldInfoText(toWx(std::format(
         "{} × {} cells\n{}", core::formatCount(static_cast<std::uint64_t>(extent.width)),
-        core::formatCount(static_cast<std::uint64_t>(extent.height)), core::formatBytes(bytes)));
+        core::formatCount(static_cast<std::uint64_t>(extent.height)), core::formatBytes(bytes))));
+}
+
+void ControlPanel::setUnboundedInfo(std::uint64_t bytes)
+{
+    setWorldInfoText(toWx(std::format("Unbounded plane\n{} in use", core::formatBytes(bytes))));
+}
+
+void ControlPanel::setWorldInfoText(const wxString& text)
+{
     if (text == m_worldInfo->GetLabelText())
     {
         return;
@@ -301,10 +352,15 @@ void ControlPanel::addSpeedGroup(wxSizer& column)
     auto*        group = new wxStaticBoxSizer(wxVERTICAL, this, "Speed");
     wxStaticBox* box   = group->GetStaticBox();
 
-    m_speedSlider = new wxSlider(box, wxID_ANY, 0, 0, core::Speed::kSliderMax);
-    m_speedSpin   = makeSpin(box, core::Speed::kMin, core::Speed::kMax, core::Speed::kMin);
-    m_maxSpeed    = new wxCheckBox(box, wxID_ANY, "Max speed");
+    m_speedSlider  = new wxSlider(box, wxID_ANY, 0, 0, core::Speed::kSliderMax);
+    m_speedSpin    = makeSpin(box, core::Speed::kMin, core::Speed::kMax, core::Speed::kMin);
+    m_maxSpeed     = new wxCheckBox(box, wxID_ANY, "Max speed");
+    m_stepLabel    = new wxStaticText(box, wxID_ANY, "Step 2^");
+    m_stepExponent = makeSpin(box, 0, static_cast<int>(SimulationRunner::kMaxStepExponent), 0);
+    m_stepSize     = new wxStaticText(box, wxID_ANY, wxString());
     m_speedSlider->SetToolTip("Generations per second (logarithmic)");
+    m_stepExponent->SetToolTip(
+        "Unbounded worlds jump 2^n generations per step; HashLife makes large jumps cheap");
 
     // The slider and the spin control show the same value; each updates the other before sending.
     m_speedSlider->Bind(wxEVT_SLIDER, [this](wxCommandEvent&) {
@@ -316,9 +372,12 @@ void ControlPanel::addSpeedGroup(wxSizer& column)
         emitCommand(*m_speedSpin, ID_SPEED_CHANGED);
     });
     sendOn(*m_maxSpeed, wxEVT_CHECKBOX, ID_TOGGLE_MAX_SPEED);
+    sendOn(*m_stepExponent, wxEVT_SPINCTRL, ID_STEP_SIZE_CHANGED);
 
     group->Add(stretchRow(m_speedSlider, {m_speedSpin}), rowFlags());
     group->Add(m_maxSpeed, rowFlags());
+    group->Add(stretchRow(m_stepLabel, {m_stepExponent}), rowFlags());
+    group->Add(m_stepSize, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 }
 

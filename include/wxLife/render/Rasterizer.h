@@ -6,6 +6,8 @@
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Grid.h"
+#include "wxLife/core/HashLife.h"
+#include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
 #include "wxLife/render/Viewport.h"
@@ -22,8 +24,19 @@ public:
     /// @pre viewport.worldExtent() == grid.extent()
     void render(const core::Grid& grid, const Viewport& viewport, const RenderStyle& style,
                 PixelBuffer& out);
+    /// The same for an unbounded plane. The cells the view shows are gathered into a grid of
+    /// their own first (forEachBlock() skips the empty ones), so from there on the drawing is the
+    /// same as for a fixed-size world. @pre viewport.unbounded()
+    void render(const core::HashLife& plane, const Viewport& viewport, const RenderStyle& style,
+                PixelBuffer& out);
 
 private:
+    /// Paints `grid`, whose cell (0, 0) is world cell `origin`, as `viewport` shows the world.
+    /// @pre the grid holds every cell the viewport shows
+    void paint(const core::Grid& grid, core::UniversePos origin, const Viewport& viewport,
+               const RenderStyle& style, PixelBuffer& out);
+
+    core::Grid m_window;  ///< The visible part of a plane; reused while the canvas keeps its size
     // Scratch rows rebuilt once per frame; kept as members so painting does not allocate.
     // A stamp is one cell's pixel run (cellSize × 3 bytes); the major ones end in a major grid-line
     // pixel. A grid row is a horizontal grid-line pixel row.

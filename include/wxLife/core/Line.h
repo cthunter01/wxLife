@@ -12,10 +12,13 @@ namespace wxLife::core
 
 /// Calls fn for every cell of the 8-connected line from a to b, both ends included, starting with
 /// a. Swapping a and b visits the same cells in reverse order.
-template <std::invocable<CellPos> Fn>
-constexpr void forEachCellOnLine(CellPos a, CellPos b, Fn fn)
+/// @pre for UniversePos, both ends within ±2^60, so no difference overflows
+template <typename Pos, std::invocable<Pos> Fn>
+    requires std::same_as<Pos, CellPos> || std::same_as<Pos, UniversePos>
+constexpr void forEachCellOnLine(Pos a, Pos b, Fn fn)
 {
-    // 64-bit throughout: b - a reaches 2^32 when the endpoints are near the int32 limits.
+    using Coordinate = decltype(Pos::x);
+    // 64-bit throughout: b - a reaches 2^32 when int32 endpoints are near their limits.
     const std::int64_t dx = std::int64_t{b.x} - a.x;
     const std::int64_t dy = std::int64_t{b.y} - a.y;
     // std::abs is not constexpr yet.
@@ -37,7 +40,8 @@ constexpr void forEachCellOnLine(CellPos a, CellPos b, Fn fn)
         const std::int64_t along   = majorStep * i;
         const std::int64_t offsetX = xIsMajor ? along : q;
         const std::int64_t offsetY = xIsMajor ? q : along;
-        fn(CellPos{.x = static_cast<Coord>(a.x + offsetX), .y = static_cast<Coord>(a.y + offsetY)});
+        fn(Pos{.x = static_cast<Coordinate>(a.x + offsetX),
+               .y = static_cast<Coordinate>(a.y + offsetY)});
 
         r += 2 * minor;  // |minor| <= steps, so one correction is enough
         if (r >= 2 * steps)

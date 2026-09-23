@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <span>
+#include <string>
 
 #include <wx/event.h>
 #include <wx/frame.h>
@@ -54,6 +55,9 @@ private:
     void onSlower();
     void onToggleMaxSpeed();
     void onSpeedChanged();
+    void onLargerStep();
+    void onSmallerStep();
+    void onStepSizeChanged();
     void onAutomatonLife();
     void onAutomatonAnt();
     void onAutomatonChanged();
@@ -77,16 +81,22 @@ private:
 
     // Callbacks from the runner and the canvas.
     void onSimulationTick(const TickReport& report);
-    void onPaintCells(std::span<const core::CellPos> cells, core::Cell value);
-    void onToggleAnt(core::CellPos cell);
+    void onPaintCells(std::span<const core::UniversePos> cells, core::Cell value);
+    void onToggleAnt(core::UniversePos cell);
     void onViewChanged();
-    void onHoverChanged(std::optional<core::CellPos> cell);
+    void onHoverChanged(std::optional<core::UniversePos> cell);
 
     /// Replaces the world with `pattern` as `setup` says: size, edges, rule, automaton, ants, speed
     /// and view. The simulation is paused at generation 0 afterwards. On failure the world is kept
     /// and a message says why.
     void loadPattern(const core::Pattern& pattern, const core::PatternSetup& setup);
-    void applyRule(const core::Rule& rule);
+    /// Refuses, with a note under the rule box, a rule an unbounded world cannot run.
+    /// @return whether the rule now runs.
+    bool applyRule(const core::Rule& rule);
+    /// Why the world cannot become unbounded now; empty if it can.
+    [[nodiscard]] std::string unboundedRefusal() const;
+    /// Unbounded worlds only; clamped to the runner's range.
+    void setStepExponent(unsigned exponent);
     void setAutomaton(core::Automaton automaton);
     void setEngine(core::StepperKind kind);
     /// Refresh the canvas and force a status update after an edit.
@@ -96,15 +106,15 @@ private:
     /// Without `force`, at most once per defaults::kStatusRefresh.
     void updateStatusBar(bool force);
 
-    core::World&                 m_world;
-    SimulationRunner             m_runner;
-    std::uint64_t                m_memoryBudget = core::defaultMemoryBudget();
-    WorldCanvas*                 m_canvas{};  ///< Owned by wx.
-    ControlPanel*                m_panel{};   ///< Owned by wx.
-    std::optional<core::CellPos> m_hovered;
-    std::optional<std::size_t>   m_lastDemo;        ///< Index into core::demos(), for the dialog.
-    wxString                     m_lastPatternDir;  ///< Where File → Open looks first.
-    core::Clock::time_point      m_lastStatusUpdate;
+    core::World&                     m_world;
+    SimulationRunner                 m_runner;
+    std::uint64_t                    m_memoryBudget = core::defaultMemoryBudget();
+    WorldCanvas*                     m_canvas{};  ///< Owned by wx.
+    ControlPanel*                    m_panel{};   ///< Owned by wx.
+    std::optional<core::UniversePos> m_hovered;
+    std::optional<std::size_t>       m_lastDemo;  ///< Index into core::demos(), for the dialog.
+    wxString                         m_lastPatternDir;  ///< Where File → Open looks first.
+    core::Clock::time_point          m_lastStatusUpdate;
 };
 
 }  // namespace wxLife::ui

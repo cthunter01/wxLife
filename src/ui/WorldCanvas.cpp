@@ -62,7 +62,14 @@ WorldCanvas::WorldCanvas(wxWindow* parent, const core::World& world, Callbacks c
     SetBackgroundStyle(wxBG_STYLE_PAINT);  // onPaint covers every pixel; no erase step
     SetBackgroundColour(toWx(m_style.outside));
     m_style.showGrid = defaults::kShowGrid;
-    m_viewport.setWorldExtent(m_world.extent());
+    if (m_world.kind() == core::WorldKind::UNBOUNDED)
+    {
+        m_viewport.setUnbounded();
+    }
+    else
+    {
+        m_viewport.setWorldExtent(m_world.extent());
+    }
     m_viewport.setCellSize(defaults::kCellSize, {});
 
     Bind(wxEVT_PAINT, &WorldCanvas::onPaint, this);
@@ -107,11 +114,24 @@ void WorldCanvas::zoomBy(int steps)
 
 void WorldCanvas::fitWorld()
 {
-    const core::Extent extent = m_world.extent();
-    showCells({.x0 = 0, .y0 = 0, .x1 = extent.width, .y1 = extent.height});
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE)
+    {
+        const core::Extent extent = m_world.extent();
+        showCells({.x0 = 0, .y0 = 0, .x1 = extent.width, .y1 = extent.height});
+        return;
+    }
+    if (const std::optional<core::UniverseRect> bounds = m_world.plane().bounds())
+    {
+        showCells(*bounds);
+        return;
+    }
+    m_keptFit.reset();
+    m_viewport.setCanvasSize(deviceClientSize());
+    m_viewport.centerOn({});
+    viewportChanged();
 }
 
-void WorldCanvas::showCells(core::CellRect cells)
+void WorldCanvas::showCells(core::UniverseRect cells)
 {
     // The fit is kept while the canvas size changes: wx reports provisional sizes before and just
     // after Show(), and under Wayland the display scale can still change after the first frame.
@@ -123,6 +143,16 @@ void WorldCanvas::showCells(core::CellRect cells)
 
 void WorldCanvas::centerWorld()
 {
+    if (m_world.kind() == core::WorldKind::UNBOUNDED)
+    {
+        const std::optional<core::UniverseRect> bounds = m_world.plane().bounds();
+        m_viewport.centerOn(
+            bounds ? core::UniversePos{.x = bounds->x0 + ((bounds->x1 - bounds->x0) / 2),
+                                       .y = bounds->y0 + ((bounds->y1 - bounds->y0) / 2)}
+                   : core::UniversePos{});
+        viewportChanged();
+        return;
+    }
     const render::PixelSize content = m_viewport.contentSize();
     const render::PixelSize canvas  = m_viewport.canvasSize();
     m_viewport.scrollTo(
@@ -148,8 +178,20 @@ const render::RenderStyle& WorldCanvas::style() const noexcept
 
 void WorldCanvas::worldExtentChanged()
 {
-    m_viewport.setWorldExtent(m_world.extent());
+    if (m_world.kind() == core::WorldKind::UNBOUNDED)
+    {
+        m_viewport.setUnbounded();
+    }
+    else
+    {
+        m_viewport.setWorldExtent(m_world.extent());
+    }
     fitWorld();
+}
+
+core::UniverseRect WorldCanvas::visibleCells() const noexcept
+{
+    return m_viewport.visibleCells();
 }
 
 core::Extent WorldCanvas::cellsThatFit() const noexcept
@@ -172,6 +214,7 @@ void WorldCanvas::cancelStroke()
 void WorldCanvas::onPaint(wxPaintEvent& /*event*/)
 {
     wxPaintDC dc(this);
+    wxASSERT(m_viewport.unbounded() == (m_world.kind() == core::WorldKind::UNBOUNDED));
     wxASSERT(m_viewport.worldExtent() == m_world.extent());
     // The client area can change without a size event, for example with the display scale. Only
     // the viewport changes inside a paint handler; the scrollbars and the listeners follow right
@@ -181,7 +224,15 @@ void WorldCanvas::onPaint(wxPaintEvent& /*event*/)
         CallAfter([this] { viewportChanged(); });
     }
 
-    m_rasterizer.render(m_world.cells(), m_viewport, m_style, m_frame);
+    if (m_world.kind() == core::WorldKind::UNBOUNDED)
+    {
+        // Safe while a step runs on the worker thread: it reads the plane as it was before.
+        m_rasterizer.render(m_world.plane(), m_viewport, m_style, m_frame);
+    }
+    else
+    {
+        m_rasterizer.render(m_world.cells(), m_viewport, m_style, m_frame);
+    }
     if (m_world.automaton() == core::Automaton::LANGTON_ANT)
     {
         render::drawAnts(m_world.ants(), m_viewport, m_style, m_frame);
@@ -254,16 +305,16 @@ void WorldCanvas::onMouse(wxMouseEvent& event)
         else if (button == wxMOUSE_BTN_LEFT && event.ControlDown())
         {
             // Places an ant instead of drawing, so no stroke starts and the mouse is not captured.
-            if (const std::optional<core::CellPos> cell = m_viewport.cellAt(point))
+            if (const std::optional<core::UniversePos> cell = m_viewport.cellAt(point))
             {
                 m_callbacks.toggleAnt(*cell);
             }
         }
-        else if (const std::optional<core::CellPos> cell = m_viewport.cellAt(point))
+        else if (const std::optional<core::UniversePos> cell = m_viewport.cellAt(point))
         {
             // Left toggles: pressing a live cell erases, pressing a dead one draws. Right always
             // erases.
-            const bool erase = button == wxMOUSE_BTN_RIGHT || m_world.at(*cell) == core::kAlive;
+            const bool erase = button == wxMOUSE_BTN_RIGHT || m_world.cellAt(*cell) == core::kAlive;
             beginPaint(*cell, erase ? core::kDead : core::kAlive);
         }
     }
@@ -328,6 +379,10 @@ void WorldCanvas::onWheel(wxMouseEvent& event)
 
 void WorldCanvas::onScroll(wxScrollWinEvent& event)
 {
+    if (m_viewport.unbounded())
+    {
+        return;  // a plane has no ends to scroll between; the bars stay still
+    }
     const bool               horizontal = event.GetOrientation() == wxHORIZONTAL;
     const render::PixelPoint offset     = m_viewport.offset();
 
@@ -485,6 +540,12 @@ void WorldCanvas::onChar(wxKeyEvent& event)
         case '[':
             send(ID_SLOWER);
             break;
+        case '}':
+            send(ID_LARGER_STEP);
+            break;
+        case '{':
+            send(ID_SMALLER_STEP);
+            break;
         case '+':
         case '=':
             send(ID_ZOOM_IN);
@@ -515,7 +576,7 @@ void WorldCanvas::onThemeChanged(wxSysColourChangedEvent& event)
     event.Skip();
 }
 
-void WorldCanvas::beginPaint(core::CellPos cell, core::Cell value)
+void WorldCanvas::beginPaint(core::UniversePos cell, core::Cell value)
 {
     m_drag           = Drag::PAINT;
     m_strokeValue    = value;
@@ -527,7 +588,7 @@ void WorldCanvas::beginPaint(core::CellPos cell, core::Cell value)
 
 void WorldCanvas::continuePaint(render::PixelPoint devicePoint)
 {
-    const core::CellPos target = m_viewport.cellAtClamped(devicePoint);
+    const core::UniversePos target = m_viewport.cellAtClamped(devicePoint);
     if (!m_lastStrokeCell)  // the camera moved (see viewportChanged())
     {
         m_lastStrokeCell = target;
@@ -543,7 +604,7 @@ void WorldCanvas::continuePaint(render::PixelPoint devicePoint)
     // moves.
     m_strokeCells.clear();
     core::forEachCellOnLine(*m_lastStrokeCell, target,
-                            [this](core::CellPos c) { m_strokeCells.push_back(c); });
+                            [this](core::UniversePos c) { m_strokeCells.push_back(c); });
     m_lastStrokeCell = target;
     // The line starts with the previous cell, which the last segment already painted.
     m_callbacks.paintCells(std::span(m_strokeCells).subspan(1), m_strokeValue);
@@ -562,7 +623,7 @@ void WorldCanvas::endDrag()
     }
 }
 
-void WorldCanvas::setHovered(std::optional<core::CellPos> cell)
+void WorldCanvas::setHovered(std::optional<core::UniversePos> cell)
 {
     if (cell == m_hovered)
     {
@@ -620,9 +681,12 @@ void WorldCanvas::syncScrollbars()
     // The first SetScrollbar() can still change the client size, so check once more.
     for (int pass = 0; pass < 2; ++pass)
     {
-        const render::PixelPoint offset  = m_viewport.offset();
-        const render::PixelSize  canvas  = m_viewport.canvasSize();
-        const render::PixelSize  content = m_viewport.contentSize();
+        const render::PixelSize canvas = m_viewport.canvasSize();
+        // A plane has no ends: the bars show a range of one page, so there is nothing to scroll.
+        const render::PixelPoint offset =
+            m_viewport.unbounded() ? render::PixelPoint{} : m_viewport.offset();
+        const render::PixelSize content =
+            m_viewport.unbounded() ? canvas : m_viewport.contentSize();
         setBar(wxHORIZONTAL, offset.x, canvas.width, content.width);
         setBar(wxVERTICAL, offset.y, canvas.height, content.height);
         if (!syncCanvasSize())

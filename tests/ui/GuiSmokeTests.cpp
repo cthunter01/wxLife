@@ -46,6 +46,7 @@
 #include <wx/menu.h>
 #include <wx/modalhook.h>
 #include <wx/msgdlg.h>
+#include <wx/radiobut.h>
 #include <wx/slider.h>
 #include <wx/spinctrl.h>
 #include <wx/statbox.h>
@@ -456,9 +457,10 @@ public:
     /// What to type into "World Size".
     struct SizeEntry
     {
-        std::string width;
-        std::string height;
-        bool        keepPattern = true;
+        std::string     width;
+        std::string     height;
+        bool            keepPattern = true;
+        core::WorldKind kind        = core::WorldKind::FIXED_SIZE;
     };
 
     DialogAnswers() { Register(); }  // the base destructor unregisters
@@ -505,9 +507,15 @@ protected:
         {
             return wxID_CANCEL;
         }
-        // Like a user: type both sides (width first), set the check box, and press Enter. wxGTK
-        // then presses OK even while it is disabled, and wx accepts the dialog only if Validate()
-        // holds.
+        // Like a user: pick the kind, type both sides (width first), set the check box, and press
+        // Enter. wxGTK then presses OK even while it is disabled, and wx accepts the dialog only
+        // if Validate() holds.
+        auto& kind = labelled<wxRadioButton>(*dialog, worldSize->kind == core::WorldKind::UNBOUNDED
+                                                          ? "Unbounded (HashLife)"
+                                                          : "Fixed size");
+        kind.SetValue(true);
+        wxCommandEvent chosen(wxEVT_RADIOBUTTON, kind.GetId());
+        deliver(kind, chosen);
         const std::vector<wxSpinCtrl*> sides = all<wxSpinCtrl>(*dialog);
         typeText(*sides.at(0), worldSize->width);
         typeText(*sides.at(1), worldSize->height);
@@ -1552,6 +1560,118 @@ TEST_F(GuiSmokeTest, OpensPatternFiles)
     {
         std::filesystem::remove(path);
     }
+}
+
+TEST_F(GuiSmokeTest, RunsUnboundedWorlds)
+{
+    DialogAnswers answers;
+    const auto    worldInfo = [this] {
+        std::vector<std::string> labels;
+        for (const wxStaticText* text : all<wxStaticText>(group("World")))
+        {
+            labels.push_back(toUtf8(text->GetLabelText()));
+        }
+        return labels;
+    };
+
+    // The size dialog turns the world into a plane, keeping the pattern.
+    const core::CellCount population = m_world.population();
+    answers.worldSize                = DialogAnswers::SizeEntry{
+        .width = "", .height = "", .keepPattern = true, .kind = core::WorldKind::UNBOUNDED};
+    command(ID_WORLD_SIZE);
+    ASSERT_EQ(m_world.kind(), core::WorldKind::UNBOUNDED);
+    EXPECT_EQ(m_world.population(), population);
+    EXPECT_EQ(status(StatusField::WORLD), "Unbounded · B3/S23 · HashLife");
+    EXPECT_TRUE(std::ranges::any_of(worldInfo(), [](const std::string& label) {
+        return label.starts_with("Unbounded plane\n");
+    }));
+    // A plane runs only Life, with HashLife, and has no edges; it is the only kind with steps.
+    EXPECT_FALSE(menuItem(ID_TOGGLE_WRAP).IsEnabled());
+    EXPECT_FALSE(menuItem(ID_ENGINE_BANDED).IsEnabled());
+    EXPECT_FALSE(menuItem(ID_AUTOMATON_ANT).IsEnabled());
+    EXPECT_FALSE(first<wxChoice>(group("Simulation")).IsEnabled());
+    EXPECT_TRUE(menuItem(ID_LARGER_STEP).IsEnabled());
+    EXPECT_FALSE(menuItem(ID_SMALLER_STEP).IsEnabled());
+    repaint();
+
+    // A glider from a file goes onto the cleared plane, centred on (0, 0).
+    const std::filesystem::path glider =
+        std::filesystem::temp_directory_path() / "wxLife_test_plane_glider.rle";
+    std::ofstream(glider, std::ios::binary) << "x = 3, y = 3\nbo$2bo$3o!\n";
+    ASSERT_TRUE(m_frame->openPatternFile(toWx(glider.string())));
+    std::filesystem::remove(glider);
+    EXPECT_EQ(m_world.kind(), core::WorldKind::UNBOUNDED);
+    EXPECT_EQ(m_world.population(), 5);
+    EXPECT_EQ(m_world.generation(), 0U);
+    EXPECT_EQ(m_world.cellAt({.x = 0, .y = -1}), core::kAlive);
+
+    // Steps of 2^10: the step runs on the worker thread and reports when it is done.
+    for (int i = 0; i < 10; ++i)
+    {
+        command(ID_LARGER_STEP);
+    }
+    const std::vector<wxSpinCtrl*> speedSpins = all<wxSpinCtrl>(group("Speed"));
+    ASSERT_EQ(speedSpins.size(), 2U);  // the rate, then the step
+    EXPECT_EQ(speedSpins.at(1)->GetValue(), 10);
+    EXPECT_TRUE(status(StatusField::SPEED).ends_with(" · step 2^10"));
+    EXPECT_TRUE(menuItem(ID_SMALLER_STEP).IsEnabled());
+    command(ID_STEP);
+    EXPECT_TRUE(runUntil([this] { return m_world.generation() == 1024; }));
+    EXPECT_TRUE(runUntil([this] { return status(StatusField::GENERATION) == "Gen 1,024"; }));
+    EXPECT_EQ(m_world.population(), 5);
+    EXPECT_EQ(m_world.cellAt({.x = 256, .y = 255}), core::kAlive);  // a quarter cell a generation
+    EXPECT_EQ(status(StatusField::STATE), "Paused");
+
+    // Max speed with steps of 2^20, set in the panel: generations race by, and a pause stops it.
+    type(*speedSpins.at(1), 20);
+    EXPECT_TRUE(status(StatusField::SPEED).ends_with(" · step 2^20"));
+    command(ID_TOGGLE_MAX_SPEED);
+    command(ID_RUN_PAUSE);
+    EXPECT_TRUE(runUntil([this] { return m_world.generation() > (std::uint64_t{1} << 23); }));
+    command(ID_RUN_PAUSE);
+    EXPECT_EQ(status(StatusField::STATE), "Paused");
+    EXPECT_EQ(m_world.population(), 5);
+    EXPECT_EQ((m_world.generation() - 1024) % (std::uint64_t{1} << 20), 0U);
+    repaint();
+
+    // Drawing adds cells to the plane, also far from the glider.
+    const core::CellCount before = m_world.population();
+    mouse(*m_canvas, wxEVT_LEFT_DOWN, canvasCentre());
+    mouse(*m_canvas, wxEVT_LEFT_UP, canvasCentre());
+    EXPECT_EQ(m_world.population(), before + 1);
+    // A rule with B0 would fill the plane at once, so it is refused and the rule stays.
+    typeAndEnter(first<wxTextCtrl>(group("Rule")), "B0/S8");
+    EXPECT_EQ(m_world.rule(), core::Rule{});
+    EXPECT_EQ(status(StatusField::WORLD), "Unbounded · B3/S23 · HashLife");
+
+    // Randomize fills what the view shows: at 2 px, some hundred thousand cells.
+    m_canvas->setCellSize(2);
+    command(ID_RANDOMIZE);
+    EXPECT_GT(m_world.population(), 10'000);
+    const core::UniverseRect view = m_canvas->visibleCells();
+    const core::UniverseRect all  = m_world.plane().bounds().value();
+    EXPECT_TRUE(all.x0 >= view.x0 && all.y0 >= view.y0 && all.x1 <= view.x1 && all.y1 <= view.y1);
+
+    // Back to a fixed size, cleared: the engine and the edges are back, the steps are gone.
+    answers.worldSize =
+        DialogAnswers::SizeEntry{.width = "64", .height = "48", .keepPattern = false};
+    command(ID_WORLD_SIZE);
+    EXPECT_EQ(m_world.kind(), core::WorldKind::FIXED_SIZE);
+    EXPECT_EQ(m_world.extent(), (core::Extent{64, 48}));
+    EXPECT_EQ(m_world.population(), 0);
+    EXPECT_EQ(status(StatusField::WORLD), "64 × 48 · torus · B3/S23 · Banded");
+    EXPECT_TRUE(menuItem(ID_ENGINE_BANDED).IsEnabled());
+    EXPECT_FALSE(menuItem(ID_LARGER_STEP).IsEnabled());
+    EXPECT_FALSE(speedSpins.at(1)->IsEnabled());
+
+    // Langton's ant needs a fixed-size world, so the dialog refuses a plane and says why.
+    command(ID_AUTOMATON_ANT);
+    answers.worldSize = DialogAnswers::SizeEntry{
+        .width = "", .height = "", .keepPattern = true, .kind = core::WorldKind::UNBOUNDED};
+    command(ID_WORLD_SIZE);
+    EXPECT_EQ(m_world.kind(), core::WorldKind::FIXED_SIZE);
+    EXPECT_TRUE(
+        std::ranges::contains(answers.sizeTexts, "Langton's ant needs a fixed-size world."));
 }
 
 TEST_F(GuiSmokeTest, QuitsCleanlyInTheMiddleOfAStroke)

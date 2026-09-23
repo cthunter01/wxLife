@@ -29,6 +29,7 @@ PatternSetup demoSetup(const Demo& demo, const Pattern& pattern)
 {
     const CellPos origin = demo.origin.value_or(centred(pattern.extent, demo.world));
     PatternSetup  setup{
+        .kind      = WorldKind::FIXED_SIZE,
         .world     = demo.world,
         .origin    = origin,
         .topology  = demo.topology,
@@ -49,11 +50,25 @@ PatternSetup demoSetup(const Demo& demo, const Pattern& pattern)
 }
 
 std::expected<PatternSetup, ExtentError> fileSetup(const Pattern& pattern, const Rule& currentRule,
-                                                   Topology      currentTopology,
+                                                   WorldKind currentKind, Topology currentTopology,
                                                    std::uint64_t memoryBudgetBytes)
 {
     const Extent size = pattern.extent;
-    const auto   side = [](Coord length, Coord margin) {
+    if (currentKind == WorldKind::UNBOUNDED)
+    {
+        return PatternSetup{
+            .kind      = WorldKind::UNBOUNDED,
+            .world     = {},
+            .origin    = {.x = -(size.width / 2), .y = -(size.height / 2)},
+            .topology  = currentTopology,
+            .rule      = pattern.rule.value_or(currentRule),
+            .automaton = Automaton::LIFE,
+            .ants      = {},
+            .speed     = std::nullopt,
+            .view      = std::nullopt,
+        };
+    }
+    const auto side = [](Coord length, Coord margin) {
         return static_cast<Coord>(std::clamp<std::int64_t>(
             std::int64_t{length} + (2 * std::int64_t{margin}), kMinWorldSide, kMaxWorldSide));
     };
@@ -74,6 +89,7 @@ std::expected<PatternSetup, ExtentError> fileSetup(const Pattern& pattern, const
         return std::unexpected(valid.error());
     }
     return PatternSetup{
+        .kind      = WorldKind::FIXED_SIZE,
         .world     = world,
         .origin    = centred(size, world),
         .topology  = currentTopology,

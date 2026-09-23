@@ -1,10 +1,11 @@
 # wxLife
 
 wxLife is Conway's Game of Life for Linux, macOS and Windows, written in C++23 with a wxWidgets 3.2
-interface (GTK 3 on Linux, Cocoa on macOS, Win32 on Windows). It runs Conway's Life and any other two-state B/S rule on worlds with sides of up to 100,000 cells, as far
-as a memory budget allows, with wrapping or dead edges, and it also runs Langton's ant on the same
-worlds. The code is split into small layers so it is easy to study and extend. A 1000 × 1000 world runs
-smoothly at every zoom level, and a 10000 × 10000 world stays usable.
+interface (GTK 3 on Linux, Cocoa on macOS, Win32 on Windows). It runs Conway's Life and any other
+two-state B/S rule on worlds with sides of up to 100,000 cells, as far as a memory budget allows, with
+wrapping or dead edges, or on an unbounded plane with HashLife, and it also runs Langton's ant on the
+fixed-size worlds. The code is split into small layers so it is easy to study and extend. A 1000 × 1000
+world runs smoothly at every zoom level, and a 10000 × 10000 world stays usable.
 [docs/architecture.md](docs/architecture.md) explains the design.
 
 ## Features
@@ -25,6 +26,12 @@ smoothly at every zoom level, and a 10000 × 10000 world stays usable.
   ones before it have just left. An ant always wraps at the edges, whatever the world's own edges do, so
   Wrap Edges, the rule and the engine are greyed out while it runs. Ants are placed with Edit → Reset
   Ants, with the panel's Ants box, or one at a time with Ctrl+left click.
+- **Unbounded worlds**: World → Size… offers an unbounded plane besides a fixed size. It runs Life
+  rules with Bill Gosper's HashLife algorithm, which remembers how every part of the pattern evolves, so
+  regular patterns can jump 2^k generations in one step: the step size goes from 1 to 2^40 generations
+  (the panel's Step box, F7 and F8, `{` and `}`). Steps run in the background, so even a step of
+  minutes leaves the window responsive, and the status bar says "Computing…" meanwhile. Positions are
+  64-bit, and a pattern has 2^59 cells in every direction before it meets the edge of the universe.
 - Worlds from 1 × 1 cell to 100,000 cells per side. A memory budget (a quarter of the RAM, at most
   16 GiB) limits the total, so a square world has at most about 92,000 cells per side. Edges either wrap
   (a torus) or are dead.
@@ -208,8 +215,9 @@ scrollbar), the stroke goes on from the cell now under the pointer, with no line
 | Key | Action |
 |---|---|
 | Space | Run or pause |
-| N | Step one generation |
+| N | Step one generation (on an unbounded plane, one step of the current size) |
 | `]` / `[` | Faster / slower |
+| `}` / `{` | Larger / smaller step, twice or half the generations per step (unbounded worlds) |
 | `+` or `=` / `-` (also on the keypad) | Zoom in / out |
 | F | Fit the world into the view |
 | C or Home | Center the world |
@@ -219,10 +227,10 @@ scrollbar), the stroke goes on from the cell now under the pointer, with no line
 | Page Up / Page Down | Pan by 90% of the view's height |
 | Esc | End the current stroke (the cells already drawn stay) |
 
-`]`, `[`, `+`, `=` and `-` are matched by the character they type, so they work on any keyboard layout,
-AltGr combinations included. An input method (for example for Chinese or Japanese) may take these keys
-first; the keypad `+` and `-` and the menu shortcuts still work. Clear, Randomize and Resize have no
-single-key shortcut, so they cannot be triggered by accident.
+`]`, `[`, `}`, `{`, `+`, `=` and `-` are matched by the character they type, so they work on any
+keyboard layout, AltGr combinations included. An input method (for example for Chinese or Japanese) may
+take these keys first; the keypad `+` and `-` and the menu shortcuts still work. Clear, Randomize and
+Resize have no single-key shortcut, so they cannot be triggered by accident.
 
 ### Menu shortcuts
 
@@ -232,6 +240,7 @@ single-key shortcut, so they cannot be triggered by accident.
 | F6 | Simulation → Step |
 | Ctrl+] / Ctrl+[ | Simulation → Faster / Slower |
 | Ctrl+M | Simulation → Max Speed |
+| F8 / F7 | Simulation → Larger Step / Smaller Step (unbounded worlds) |
 | none | Simulation → Automaton → Life / Langton's Ant |
 | none | Simulation → Engine → Banded / Reference |
 | Ctrl+Delete | Edit → Clear |
@@ -254,11 +263,13 @@ The panel on the left has the same actions, plus:
 - the random-fill density (1–100%);
 - a Demos… button next to Resize…, which opens the demo patterns;
 - an exact speed box and an exact cell-size box;
+- on an unbounded plane, the step size as a power of two, with the number of generations it means;
 - a rule box: type a rule and press Enter, or click Apply.
 
 Whichever automaton is running greys out what only the other one uses, so a control that would do
 nothing is visibly dead: Langton's ant disables the Rule group, Wrap Edges and the Engine submenu, and
-Life disables the ant count and Reset Ants.
+Life disables the ant count and Reset Ants. An unbounded plane likewise disables the automaton choice,
+Wrap Edges and the Engine submenu, and only a plane enables the step size.
 
 A rule the app cannot read shows an error below the box, and the current rule stays in effect. The mouse
 wheel changes a slider, a number box or the preset list only while that control has the focus. Over an
@@ -293,6 +304,14 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
     size until it is valid.
   - During a resize the old and the new world exist at the same time.
   - "Keep the current pattern" keeps the pattern centred.
+  - **Unbounded** in the same dialog turns the world into a plane. Its memory grows with the pattern,
+    up to the same budget; the panel shows what it uses. Keeping the pattern puts the centre of the
+    old world at (0, 0), and going back to a fixed size puts (0, 0) at the centre of the new world.
+    A plane runs only Life, and only rules without B0 (a birth on 0 neighbours would fill the whole
+    plane at once): the dialog refuses Unbounded while Langton's ant runs or the rule has B0, and says
+    why, and the rule box refuses a B0 rule while a plane runs.
+  - On a plane, Randomize fills what the view shows, Fit shows the whole pattern, and the scrollbars do
+    nothing; pan with the mouse or the keys. The view can go 2^55 pixels from the centre.
 - **Demo patterns.** Loading a demo replaces the world, pauses at generation 0 and sets the world size,
   edges, rule, speed and automaton the demo was tuned for. Every setting was chosen by running the
   demo: gliders from the guns vanish cleanly at the dead edges, and the methuselahs evolve exactly as
@@ -302,14 +321,16 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
     generations; each description says how far its calculator is right until then.
   - The universal Turing machine's world needs about 330 MB. A demo that does not fit the memory
     budget is listed but cannot be loaded, and the dialog says why.
-  - Patterns far larger than a world can be, such as the Caterpillar spaceship (4,195 × 330,721 cells),
-    need a HashLife engine and are not included. [patterns/README.md](patterns/README.md) lists the
-    sources and how to add a demo.
+  - Patterns far larger than a fixed-size world can be, such as the Caterpillar spaceship (4,195 ×
+    330,721 cells), are published as macrocell files, which wxLife does not read yet, so they are not
+    included. [patterns/README.md](patterns/README.md) lists the sources and how to add a demo.
 - **Pattern files.** File → Open Pattern… puts the pattern in the middle of a new world with half its
   size, but at least 50 cells, of room on each side, shrunk to fit the memory budget if needed. The
   rule is the one the file names (RLE `rule =` or `#r`); a file without one keeps the current rule, and
-  the edges and the speed stay as they are. Macrocell (`.mc`), Life 1.05/1.06 and multi-state files
-  are refused with a message, and so is a pattern wider or taller than 100,000 cells.
+  the edges and the speed stay as they are. On an unbounded plane the pattern goes onto the cleared
+  plane, centred on (0, 0); a file whose rule has B0 is refused there with a message. Macrocell
+  (`.mc`), Life 1.05/1.06 and multi-state files are refused with a message, and so is a pattern wider
+  or taller than 100,000 cells.
 - **Engine.** The Reference engine can be chosen only for worlds of up to 1,000,000 cells. Resizing to
   a larger world switches back to Banded. Only Life uses an engine at all.
 - **Langton's ant.** A world carries 0 to 64 ants. Switching to the ant seeds one in the middle;
@@ -325,6 +346,11 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
   - Each timer tick stops stepping once 10 ms have passed, so a tick takes about 10 ms plus at most one
     generation. Once a world is too large for the target rate, it runs as fast as the machine allows.
   - After a stall, the simulation drops the backlog instead of catching up in a burst.
+  - On an unbounded plane the speed still counts generations per second, but they come 2^k at a time:
+    at 30 gen/s with steps of 2^10, a step starts about every 34 seconds, and at Max each step starts
+    as soon as the one before has finished. A step that runs short of memory is tried once more after
+    the unused parts of the plane have been freed; if it still does not fit, or the pattern reaches the
+    edge of the universe, the simulation stops and says why. A smaller step may then still fit.
   - The status bar shows the target (`30 gen/s` or `Max`), then the achieved rate once it has been
     measured (`30 gen/s (29.9)` or `Max (… gen/s)`). A measurement takes at least half a second and two
     generations.
@@ -407,3 +433,9 @@ the GUI smoke tests do not run at all, the whole list is the only check of the i
       generations apart for 2, 3, 5 and 7.
 - [ ] File → Open Pattern…: open an `.rle` and a `.cells` file downloaded from LifeWiki, and a text file
       that is neither, which is refused with a message.
+- [ ] World → Size…, Unbounded, keeping the pattern: the pattern stays, the panel shows the memory in
+      use, and Wrap Edges, the Engine submenu and the automaton choice are greyed out.
+- [ ] On the plane, open the Gosper glider gun, set the step to 2^10 with F8 or `}`, and run at Max:
+      the stream of gliders grows by 1024 generations a step, and Fit centres the view on it.
+- [ ] Set the step to 2^30 on a busy pattern: the status bar says "Computing…", and the window still
+      pans, zooms and repaints. Pause, draw or Clear during the step: it stops at once.

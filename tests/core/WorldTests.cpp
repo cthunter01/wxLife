@@ -8,8 +8,10 @@
 #include <limits>
 #include <memory>
 #include <new>
+#include <optional>
 #include <span>
 #include <string_view>
+#include <utility>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -749,6 +751,156 @@ TEST(WorldTest, TheAntBuildsTheKnownHighway)
         }
     }
     EXPECT_EQ(world.population(), world.cells().countAlive());
+}
+
+// -------------------------------------------------------------------------------------------------
+// Unbounded worlds
+// -------------------------------------------------------------------------------------------------
+
+constexpr std::uint64_t kPlaneBudget = std::uint64_t{1} << 28;
+
+// The live cells of any world, as (x, y) pairs.
+std::vector<std::pair<std::int64_t, std::int64_t>> liveCells(const World& world)
+{
+    std::vector<std::pair<std::int64_t, std::int64_t>> cells;
+    if (world.kind() == WorldKind::UNBOUNDED)
+    {
+        if (const std::optional<UniverseRect> bounds = world.plane().bounds())
+        {
+            world.plane().forEachBlock(*bounds, 0,
+                                       [&](UniversePos p) { cells.emplace_back(p.x, p.y); });
+        }
+    }
+    else
+    {
+        for (Coord y = 0; y < world.extent().height; ++y)
+        {
+            for (Coord x = 0; x < world.extent().width; ++x)
+            {
+                if (world.at({.x = x, .y = y}) == kAlive)
+                {
+                    cells.emplace_back(x, y);
+                }
+            }
+        }
+    }
+    std::ranges::sort(cells);
+    return cells;
+}
+
+TEST(WorldTest, BecomingUnboundedKeepsThePatternAndTheGeneration)
+{
+    World world({.width = 9, .height = 7}, Rule{}, Topology::BOUNDED);
+    draw(world, kGlider, {.x = 1, .y = 1});
+    world.step();
+    world.step();
+    const auto before = liveCells(world);
+    world.makeUnbounded(true, kPlaneBudget);
+    EXPECT_EQ(world.kind(), WorldKind::UNBOUNDED);
+    EXPECT_EQ(world.extent(), (Extent{}));
+    EXPECT_EQ(world.generation(), 2U);
+    EXPECT_EQ(world.population(), 5);
+    // The grid's centre cell, (4, 3), is the plane's (0, 0).
+    std::vector<std::pair<std::int64_t, std::int64_t>> moved;
+    moved.reserve(before.size());
+    for (const auto& [x, y] : before)
+    {
+        moved.emplace_back(x - 4, y - 3);
+    }
+    EXPECT_EQ(liveCells(world), moved);
+    EXPECT_EQ(world.cellAt({.x = moved.front().first, .y = moved.front().second}), kAlive);
+    EXPECT_EQ(world.cellAt({.x = -1'000'000, .y = 5}), kDead);
+
+    // It steps on as the grid would have, without edges.
+    ASSERT_TRUE(world.stepPlane(2).has_value());
+    EXPECT_EQ(world.generation(), 6U);
+    EXPECT_EQ(world.population(), 5);
+
+    // And back: the plane's (0, 0) becomes the new grid's centre cell, (10, 10).
+    const auto onPlane = liveCells(world);
+    world.resize({.width = 21, .height = 21}, true);
+    EXPECT_EQ(world.kind(), WorldKind::FIXED_SIZE);
+    EXPECT_EQ(world.generation(), 6U);
+    EXPECT_EQ(world.population(), 5);
+    std::vector<std::pair<std::int64_t, std::int64_t>> back;
+    back.reserve(onPlane.size());
+    for (const auto& [x, y] : onPlane)
+    {
+        back.emplace_back(x + 10, y + 10);
+    }
+    EXPECT_EQ(liveCells(world), back);
+}
+
+TEST(WorldTest, ANewPlaneStartsEmpty)
+{
+    World world({.width = 9, .height = 7});
+    draw(world, kGlider);
+    world.step();
+    world.makeUnbounded(false, kPlaneBudget);
+    EXPECT_EQ(world.kind(), WorldKind::UNBOUNDED);
+    EXPECT_EQ(world.population(), 0);
+    EXPECT_EQ(world.generation(), 0U);
+    world.resize({.width = 5, .height = 5}, false);
+    EXPECT_EQ(world.kind(), WorldKind::FIXED_SIZE);
+    EXPECT_EQ(world.population(), 0);
+}
+
+TEST(WorldTest, APlaneTakesCellsRulesAndClears)
+{
+    World world({.width = 4, .height = 4});
+    world.makeUnbounded(false, kPlaneBudget);
+    constexpr std::int64_t         kFar = std::int64_t{1} << 40;
+    const std::vector<UniversePos> cells{{.x = -kFar, .y = 0}, {.x = kFar, .y = kFar}};
+    EXPECT_EQ(world.setCells(cells, kAlive), 2);
+    EXPECT_EQ(world.population(), 2);
+    EXPECT_EQ(world.cellAt({.x = kFar, .y = kFar}), kAlive);
+    // Patterns come with 32-bit cells and an offset.
+    const std::vector<CellPos> block{
+        {.x = 0, .y = 0}, {.x = 1, .y = 0}, {.x = 0, .y = 1}, {.x = 1, .y = 1}};
+    EXPECT_EQ(world.setCells(block, kAlive, {.x = -5, .y = -5}), 4);
+    EXPECT_EQ(world.cellAt({.x = -4, .y = -4}), kAlive);
+
+    world.setRule(Rule::parse("B36/S23").value());
+    EXPECT_EQ(world.plane().rule().toString(), "B36/S23");
+
+    world.clear();
+    EXPECT_EQ(world.population(), 0);
+    EXPECT_EQ(world.generation(), 0U);
+    EXPECT_EQ(world.kind(), WorldKind::UNBOUNDED);
+}
+
+TEST(WorldTest, RandomizingAPlaneFillsJustTheArea)
+{
+    World world({.width = 4, .height = 4});
+    world.makeUnbounded(false, kPlaneBudget);
+    const UniverseRect area{.x0 = -50, .y0 = 1000, .x1 = 30, .y1 = 1040};
+    world.randomize(0.5, 42, area);
+    const auto cells = liveCells(world);
+    ASSERT_FALSE(cells.empty());
+    for (const auto& [x, y] : cells)
+    {
+        EXPECT_TRUE(x >= area.x0 && x < area.x1 && y >= area.y0 && y < area.y1) << x << ", " << y;
+    }
+    // About half of the 80 × 40 cells, and the same cells for the same seed.
+    EXPECT_GT(world.population(), 1200);
+    EXPECT_LT(world.population(), 2000);
+    world.randomize(0.5, 42, area);
+    EXPECT_EQ(liveCells(world), cells);
+    EXPECT_EQ(world.generation(), 0U);
+}
+
+TEST(WorldTest, FarCellsCannotWrapIntoAGrid)
+{
+    // 2^32 + 3 would be 3 if it were cut to 32 bits first.
+    World                          world({.width = 8, .height = 8});
+    constexpr std::int64_t         kWrapped = (std::int64_t{1} << 32) + 3;
+    const std::vector<UniversePos> cells{{.x = kWrapped, .y = 3}, {.x = 3, .y = -kWrapped}};
+    EXPECT_EQ(world.setCells(cells, kAlive), 0);
+    EXPECT_EQ(world.population(), 0);
+    EXPECT_EQ(world.cellAt({.x = kWrapped, .y = 3}), kDead);
+    const std::vector<UniversePos> inside{{.x = 3, .y = 3}};
+    EXPECT_EQ(world.setCells(inside, kAlive), 1);
+    EXPECT_EQ(world.cellAt({.x = 3, .y = 3}), kAlive);
 }
 
 }  // namespace

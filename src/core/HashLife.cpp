@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
@@ -106,7 +107,7 @@ HashLife::HashLife(const Rule& rule, std::uint64_t memoryBudgetBytes) : m_rule(r
     constexpr std::uint64_t kBytesPerNode = sizeof(Node) + (4 * sizeof(NodeId));
     m_maxNodes                            = static_cast<std::size_t>(std::clamp<std::uint64_t>(
         memoryBudgetBytes / kBytesPerNode, kChunkNodes, std::uint64_t{kNoNode} - 1));
-    m_chunks.reserve((m_maxNodes + kChunkNodes - 1) / kChunkNodes);
+    m_chunks.resize((m_maxNodes + kChunkNodes - 1) / kChunkNodes);
     setRule(rule);
     clear();
 }
@@ -213,15 +214,16 @@ CellCount HashLife::setCells(std::span<const CellPos> cells, Cell value, Univers
 
 void HashLife::clear()
 {
-    m_chunks.clear();
-    m_nodeCount            = 0;
-    m_nodesAfterCollection = 0;
+    for (std::vector<Node>& chunk : m_chunks)
+    {
+        chunk = {};
+    }
     // The two single cells have fixed ids and stay out of the hash table.
-    m_chunks.emplace_back();
-    m_chunks.back().reserve(kChunkNodes);
-    m_chunks.back().push_back({.population = 0, .level = 0});
-    m_chunks.back().push_back({.population = 1, .level = 0});
-    m_nodeCount = 2;
+    m_chunks[0].resize(kChunkNodes);
+    node(kDeadCell)        = {.population = 0, .level = 0};
+    node(kAliveCell)       = {.population = 1, .level = 0};
+    m_nodeCount            = 2;
+    m_nodesAfterCollection = 0;
     m_table.assign(kInitialSlots, kNoNode);
     m_emptyNodes.fill(kNoNode);
     m_emptyNodes[0] = kDeadCell;
@@ -229,7 +231,8 @@ void HashLife::clear()
     m_generation    = 0;
 }
 
-std::expected<void, HashLifeError> HashLife::step(unsigned exponent)
+std::expected<void, HashLifeError> HashLife::step(unsigned                   exponent,
+                                                  const HashLifeStepOptions& options)
 {
     assert(exponent <= kMaxStepExponent);
     const std::uint64_t generations = std::uint64_t{1} << exponent;
@@ -238,17 +241,29 @@ std::expected<void, HashLifeError> HashLife::step(unsigned exponent)
         m_generation += generations;  // an empty plane stays empty
         return {};
     }
-    collectIfFull();
-    for (int attempt = 0; attempt < 2; ++attempt)
+    if (options.collectGarbage)
+    {
+        collectIfFull();
+    }
+    m_cancel           = options.cancel;
+    const int attempts = options.collectGarbage ? 2 : 1;
+    for (int attempt = 0; attempt < attempts; ++attempt)
     {
         try
         {
-            if (!advance(exponent))
+            const bool advanced = advance(exponent);
+            m_cancel            = nullptr;
+            if (!advanced)
             {
                 return std::unexpected(HashLifeError::UNIVERSE_EDGE);
             }
             m_generation += generations;
             return {};
+        }
+        catch (const Cancelled&)
+        {
+            m_cancel = nullptr;
+            return std::unexpected(HashLifeError::CANCELLED);
         }
         catch (const OutOfNodes&)  // NOLINT(bugprone-empty-catch): retried below
         {
@@ -257,8 +272,12 @@ std::expected<void, HashLifeError> HashLife::step(unsigned exponent)
         {
         }
         // The root has not changed; everything the failed step built is garbage.
-        collectGarbage();
+        if (options.collectGarbage)
+        {
+            collectGarbage();
+        }
     }
+    m_cancel = nullptr;
     return std::unexpected(HashLifeError::OUT_OF_MEMORY);
 }
 
@@ -296,13 +315,19 @@ std::size_t HashLife::maxNodes() const noexcept
     return m_maxNodes;
 }
 
+std::uint64_t HashLife::memoryBytes() const noexcept
+{
+    const std::uint64_t chunks = (m_nodeCount + kChunkNodes - 1) / kChunkNodes;
+    return (chunks * kChunkNodes * sizeof(Node)) + (m_table.size() * sizeof(NodeId));
+}
+
 void HashLife::collectGarbage()
 {
     // Mark what the root needs.
     std::vector<std::uint8_t> keep(m_nodeCount, 0);
     keep[kDeadCell]  = 1;
     keep[kAliveCell] = 1;
-    std::vector<NodeId> pending{m_root};
+    std::vector<NodeId> pending{m_root.load()};
     while (!pending.empty())
     {
         const NodeId id = pending.back();
@@ -341,11 +366,13 @@ void HashLife::collectGarbage()
         node(next)      = survivor;
         ++next;
     }
-    m_root      = moved[m_root];
+    m_root      = moved[m_root.load()];
     m_nodeCount = next;
-    m_chunks.resize((m_nodeCount + kChunkNodes - 1) / kChunkNodes);
-    const std::size_t inLast = m_nodeCount - ((m_chunks.size() - 1) * kChunkNodes);
-    m_chunks.back().resize(inLast);
+    for (std::size_t chunk = (m_nodeCount + kChunkNodes - 1) / kChunkNodes; chunk < m_chunks.size();
+         ++chunk)
+    {
+        m_chunks[chunk] = {};
+    }
 
     m_emptyNodes.fill(kNoNode);
     m_emptyNodes[0]   = kDeadCell;
@@ -395,16 +422,15 @@ HashLife::NodeId HashLife::join(const std::array<NodeId, 4>& children)
     {
         population += node(child).population;
     }
+    const auto id = static_cast<NodeId>(m_nodeCount);
     if (m_nodeCount % kChunkNodes == 0)
     {
-        m_chunks.emplace_back();  // within the capacity reserved up front, so no chunk moves
-        m_chunks.back().reserve(kChunkNodes);
+        m_chunks[m_nodeCount / kChunkNodes].resize(kChunkNodes);  // no-op if it is still there
     }
-    const auto id = static_cast<NodeId>(m_nodeCount);
-    m_chunks.back().push_back({.children   = children,
-                               .population = population,
-                               .result     = kNoNode,
-                               .level = static_cast<std::uint8_t>(node(children[0]).level + 1)});
+    node(id) = Node{.children   = children,
+                    .population = population,
+                    .result     = kNoNode,
+                    .level      = static_cast<std::uint8_t>(node(children[0]).level + 1)};
     ++m_nodeCount;
     m_table[slot] = id;
     if (2 * (m_nodeCount - 2) > m_table.size())  // the two single cells are not in the table
@@ -501,6 +527,11 @@ HashLife::NodeId HashLife::successor(NodeId id)
     if (n.result != kNoNode)
     {
         return n.result;
+    }
+    // Checked only where there is real work below, so the flag costs nothing measurable.
+    if (m_cancel != nullptr && n.level >= 6 && m_cancel->load(std::memory_order_relaxed))
+    {
+        throw Cancelled{};
     }
     NodeId result = kNoNode;
     if (n.population == 0)
@@ -609,12 +640,9 @@ bool HashLife::advance(unsigned exponent)
 
 void HashLife::forgetResults() noexcept
 {
-    for (std::vector<Node>& chunk : m_chunks)
+    for (std::size_t id = 0; id < m_nodeCount; ++id)
     {
-        for (Node& n : chunk)
-        {
-            n.result = kNoNode;
-        }
+        node(static_cast<NodeId>(id)).result = kNoNode;
     }
 }
 

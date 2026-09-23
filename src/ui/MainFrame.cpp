@@ -1,5 +1,6 @@
 #include "wxLife/ui/MainFrame.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstddef>
@@ -29,6 +30,7 @@
 
 #include "wxLife/core/Demo.h"
 #include "wxLife/core/Format.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/Pacer.h"
 #include "wxLife/core/Pattern.h"
 #include "wxLife/core/PatternSetup.h"
@@ -70,7 +72,7 @@ constexpr std::string_view kControlsHelp = R"(Mouse on the world
 Keys while the world has focus (click it first)
     Space: run or pause
     N: step one generation
-    ] and [: faster and slower
+    ] and [: faster and slower    } and {: larger and smaller step
     + and -: zoom in and out
     F: fit the world    C or Home: center it
     G: grid lines    W: wrap edges
@@ -81,6 +83,7 @@ Everywhere (a focused text or number box keeps its own editing
 keys, such as Ctrl+Home and Ctrl+Delete)
     F5: run or pause    F6: step
     Ctrl+] and Ctrl+[: faster and slower    Ctrl+M: max speed
+    F8 and F7: larger and smaller step (unbounded worlds)
     Ctrl+O: open a pattern file    Ctrl+D: demo patterns
     Ctrl+R: randomize    Ctrl+Delete: clear    Ctrl+L: edit the rule
     Ctrl+N: world size    Ctrl+T: wrap edges
@@ -187,6 +190,10 @@ constexpr std::uint64_t kMaxPatternFileBytes = std::uint64_t{256} << 20;
 // also what the GUI smoke test pins, so it must stay exactly as it is.
 [[nodiscard]] std::string worldText(const core::World& world)
 {
+    if (world.kind() == core::WorldKind::UNBOUNDED)
+    {
+        return std::format("Unbounded · {} · HashLife", world.rule().toString());
+    }
     const core::Extent extent = world.extent();
     const std::string  size =
         std::format("{} × {}", countText(extent.width), countText(extent.height));
@@ -242,11 +249,11 @@ void MainFrame::buildLayout()
     m_canvas = new WorldCanvas(
         this, m_world,
         {
-            .paintCells   = [this](std::span<const core::CellPos> cells,
+            .paintCells   = [this](std::span<const core::UniversePos> cells,
                                    core::Cell value) { onPaintCells(cells, value); },
-            .toggleAnt    = [this](core::CellPos cell) { onToggleAnt(cell); },
+            .toggleAnt    = [this](core::UniversePos cell) { onToggleAnt(cell); },
             .viewChanged  = [this] { onViewChanged(); },
-            .hoverChanged = [this](std::optional<core::CellPos> cell) { onHoverChanged(cell); },
+            .hoverChanged = [this](std::optional<core::UniversePos> cell) { onHoverChanged(cell); },
         });
 
     auto* row = new wxBoxSizer(wxHORIZONTAL);
@@ -269,6 +276,9 @@ void MainFrame::bindCommands()
         {ID_SLOWER, &MainFrame::onSlower},
         {ID_TOGGLE_MAX_SPEED, &MainFrame::onToggleMaxSpeed},
         {ID_SPEED_CHANGED, &MainFrame::onSpeedChanged},
+        {ID_LARGER_STEP, &MainFrame::onLargerStep},
+        {ID_SMALLER_STEP, &MainFrame::onSmallerStep},
+        {ID_STEP_SIZE_CHANGED, &MainFrame::onStepSizeChanged},
         {ID_AUTOMATON_LIFE, &MainFrame::onAutomatonLife},
         {ID_AUTOMATON_ANT, &MainFrame::onAutomatonAnt},
         {ID_AUTOMATON_CHANGED, &MainFrame::onAutomatonChanged},
@@ -337,13 +347,35 @@ void MainFrame::onStep()
 
 void MainFrame::onClear()
 {
+    m_runner.interrupt();
     m_world.clear();
     worldContentChanged();
 }
 
 void MainFrame::onRandomize()
 {
-    m_world.randomize(m_panel->randomDensity(), freshSeed());
+    m_runner.interrupt();
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE)
+    {
+        m_world.randomize(m_panel->randomDensity(), freshSeed());
+        worldContentChanged();
+        return;
+    }
+    // A plane has no whole to fill, so what the view shows is filled.
+    core::UniverseRect area = m_canvas->visibleCells();
+    area.x1                 = std::min(area.x1, area.x0 + core::kMaxWorldSide);
+    area.y1                 = std::min(area.y1, area.y0 + core::kMaxWorldSide);
+    try
+    {
+        const wxBusyCursor busy;
+        m_world.randomize(m_panel->randomDensity(), freshSeed(), area);
+    }
+    catch (const std::bad_alloc&)
+    {
+        wxMessageBox("There is not enough memory for that many cells. The world was cleared.",
+                     "Randomize", wxOK | wxICON_ERROR, this);
+        m_world.clear();
+    }
     worldContentChanged();
 }
 
@@ -378,10 +410,23 @@ bool MainFrame::openPatternFile(const wxString& path)
             [](const core::PatternError& error) { return core::describe(error); });
     });
     const auto setup   = pattern.and_then([this](const core::Pattern& read) {
-        return core::fileSetup(read, m_world.rule(), m_world.topology(), m_memoryBudget)
+        return core::fileSetup(read, m_world.rule(), m_world.kind(), m_world.topology(),
+                               m_memoryBudget)
             .transform_error([&](core::ExtentError error) {
                 return std::format("The pattern is {} cells. {}", sizeText(read.extent),
                                    core::describe(error, read.extent, m_memoryBudget));
+            })
+            .and_then([](const core::PatternSetup& ready)
+                          -> std::expected<core::PatternSetup, std::string> {
+                if (ready.kind == core::WorldKind::UNBOUNDED &&
+                    !core::HashLife::supports(ready.rule))
+                {
+                    return std::unexpected(std::format(
+                        "It runs {}, and an unbounded world cannot run a rule with B0: every "
+                        "empty cell of the plane would be born at once.",
+                        ready.rule.toString()));
+                }
+                return ready;
             });
     });
     if (!setup)
@@ -449,6 +494,24 @@ void MainFrame::onSpeedChanged()
     updateStatusBar(true);
 }
 
+void MainFrame::onLargerStep()
+{
+    setStepExponent(m_runner.stepExponent() + 1);
+}
+
+void MainFrame::onSmallerStep()
+{
+    if (m_runner.stepExponent() > 0)
+    {
+        setStepExponent(m_runner.stepExponent() - 1);
+    }
+}
+
+void MainFrame::onStepSizeChanged()
+{
+    setStepExponent(m_panel->stepExponent());
+}
+
 void MainFrame::onAutomatonLife()
 {
     setAutomaton(core::Automaton::LIFE);
@@ -473,13 +536,22 @@ void MainFrame::onResetAnts()
 
 void MainFrame::onEngineBanded()
 {
-    setEngine(core::StepperKind::BANDED);
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE)
+    {
+        setEngine(core::StepperKind::BANDED);
+    }
+    else
+    {
+        syncControls();  // an unbounded world runs HashLife; the menu item is disabled anyway
+    }
 }
 
 void MainFrame::onEngineReference()
 {
-    // The menu item is disabled for larger worlds; this check keeps a stray event harmless.
-    if (m_world.extent().cellCount() <= core::ReferenceStepper::kRecommendedMaxCells)
+    // The menu item is disabled for larger and unbounded worlds; this check keeps a stray event
+    // harmless.
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE &&
+        m_world.extent().cellCount() <= core::ReferenceStepper::kRecommendedMaxCells)
     {
         setEngine(core::StepperKind::REFERENCE);
     }
@@ -528,27 +600,46 @@ void MainFrame::onWorldSize()
     m_runner.stop();
     m_canvas->cancelStroke();
 
-    const auto request =
-        WorldSizeDialog::ask(this, m_world.extent(), m_canvas->cellsThatFit(), m_memoryBudget);
-    // The dialog accepts only valid sizes; checking again keeps the budget safe whatever the
+    const std::string refusal = unboundedRefusal();
+    const auto request = WorldSizeDialog::ask(this, m_world.kind(), m_world.extent(),
+                                              m_canvas->cellsThatFit(), m_memoryBudget, refusal);
+    // The dialog accepts only valid choices; checking again keeps the budget safe whatever the
     // dialog does.
-    if (request && core::validateExtent(request->extent, m_memoryBudget))
+    const bool valid =
+        request && (request->kind == core::WorldKind::UNBOUNDED
+                        ? refusal.empty()
+                        : core::validateExtent(request->extent, m_memoryBudget).has_value());
+    if (valid)
     {
         try
         {
             const wxBusyCursor busy;
-            m_world.resize(request->extent, request->keepPattern);
+            if (request->kind == core::WorldKind::UNBOUNDED)
+            {
+                m_world.makeUnbounded(request->keepPattern, m_memoryBudget);
+            }
+            else
+            {
+                m_world.resize(request->extent, request->keepPattern);
+            }
             m_canvas->worldExtentChanged();  // at once, so no paint sees the old extent
         }
         catch (const std::bad_alloc&)
         {
-            // World::resize() has the strong guarantee: the old world is intact.
-            const std::string message = std::format(
-                "There is not enough memory for a {} × {} world. The current world was kept.",
-                countText(request->extent.width), countText(request->extent.height));
+            // Both changes have the strong guarantee: the old world is intact.
+            const std::string message =
+                request->kind == core::WorldKind::UNBOUNDED
+                    ? std::string(
+                          "There is not enough memory for an unbounded world with this "
+                          "pattern. The current world was kept.")
+                    : std::format(
+                          "There is not enough memory for a {} world. The current world "
+                          "was kept.",
+                          sizeText(request->extent));
             wxMessageBox(toWx(message), "World Size", wxOK | wxICON_ERROR, this);
         }
-        if (m_world.stepper().kind() == core::StepperKind::REFERENCE &&
+        if (m_world.kind() == core::WorldKind::FIXED_SIZE &&
+            m_world.stepper().kind() == core::StepperKind::REFERENCE &&
             m_world.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
         {
             setEngine(core::StepperKind::BANDED);
@@ -565,8 +656,11 @@ void MainFrame::onWorldSize()
 
 void MainFrame::onToggleWrap()
 {
-    const bool torus = m_world.topology() == core::Topology::TORUS;
-    m_world.setTopology(torus ? core::Topology::BOUNDED : core::Topology::TORUS);
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE)  // a plane has no edges to wrap
+    {
+        const bool torus = m_world.topology() == core::Topology::TORUS;
+        m_world.setTopology(torus ? core::Topology::BOUNDED : core::Topology::TORUS);
+    }
     syncControls();
     updateStatusBar(true);
 }
@@ -625,27 +719,49 @@ void MainFrame::onClose(wxCloseEvent& event)
     // twice.
 }
 
-void MainFrame::onSimulationTick(const TickReport& /*report*/)
+void MainFrame::onSimulationTick(const TickReport& report)
 {
+    if (report.error)
+    {
+        syncControls();
+        updateStatusBar(true);
+        wxMessageBox(toWx(core::describe(*report.error)), "Simulation Stopped",
+                     wxOK | wxICON_WARNING, this);
+        return;
+    }
     m_canvas->Refresh(false);
-    updateStatusBar(false);
+    // A busy report, or the end of a single step, must show at once; running ticks are throttled.
+    updateStatusBar(report.generationsStepped == 0 || !m_runner.isRunning());
 }
 
-void MainFrame::onPaintCells(std::span<const core::CellPos> cells, core::Cell value)
+void MainFrame::onPaintCells(std::span<const core::UniversePos> cells, core::Cell value)
 {
-    if (m_world.setCells(cells, value) > 0)
+    m_runner.interrupt();  // the running step goes on at the next tick, with the new cells
+    try
     {
-        worldContentChanged();
+        if (m_world.setCells(cells, value) > 0)
+        {
+            worldContentChanged();
+        }
+    }
+    catch (const std::bad_alloc&)
+    {
+        m_canvas->cancelStroke();
+        wxMessageBox("There is not enough memory for more cells.", "Draw", wxOK | wxICON_ERROR,
+                     this);
     }
 }
 
-void MainFrame::onToggleAnt(core::CellPos cell)
+void MainFrame::onToggleAnt(core::UniversePos cell)
 {
-    if (m_world.automaton() != core::Automaton::LANGTON_ANT)
+    const core::Extent extent = m_world.extent();
+    if (m_world.automaton() != core::Automaton::LANGTON_ANT || cell.x >= extent.width ||
+        cell.y >= extent.height || cell.x < 0 || cell.y < 0)
     {
-        return;  // Ctrl+click means nothing to Life
+        return;  // Ctrl+click means nothing to Life, and ants live only in fixed-size worlds
     }
-    m_world.toggleAntAt(cell);
+    m_world.toggleAntAt(
+        {.x = static_cast<core::Coord>(cell.x), .y = static_cast<core::Coord>(cell.y)});
     syncControls();  // the panel's ant count follows the model
     worldContentChanged();
 }
@@ -656,7 +772,7 @@ void MainFrame::onViewChanged()
     updateStatusBar(true);
 }
 
-void MainFrame::onHoverChanged(std::optional<core::CellPos> cell)
+void MainFrame::onHoverChanged(std::optional<core::UniversePos> cell)
 {
     m_hovered = cell;
     updateStatusBar(true);
@@ -666,9 +782,10 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
 {
     m_runner.stop();
     m_canvas->cancelStroke();
+    const bool unbounded = setup.kind == core::WorldKind::UNBOUNDED;
     // The callers offer only worlds that fit; checking again keeps the budget safe whatever they
     // do.
-    if (const auto valid = core::validateExtent(setup.world, m_memoryBudget); !valid)
+    if (const auto valid = core::validateExtent(setup.world, m_memoryBudget); !unbounded && !valid)
     {
         wxMessageBox(toWx(core::describe(valid.error(), setup.world, m_memoryBudget)),
                      "Load Pattern", wxOK | wxICON_ERROR, this);
@@ -679,7 +796,14 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
     try
     {
         const wxBusyCursor busy;
-        if (setup.world == m_world.extent())
+        if (unbounded)
+        {
+            // A plane runs Life with a rule it supports (the caller checked), so both come first.
+            m_world.setAutomaton(core::Automaton::LIFE);
+            m_world.setRule(setup.rule);
+            m_world.makeUnbounded(false, m_memoryBudget);
+        }
+        else if (m_world.kind() == core::WorldKind::FIXED_SIZE && setup.world == m_world.extent())
         {
             m_world.clear();
         }
@@ -691,10 +815,15 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
     }
     catch (const std::bad_alloc&)
     {
-        // World::resize() has the strong guarantee: the old world is intact.
+        // World::resize() and makeUnbounded() have the strong guarantee: the old world is intact.
         const std::string message =
-            std::format("There is not enough memory for a {} world. The current world was kept.",
-                        sizeText(setup.world));
+            unbounded ? std::string(
+                            "There is not enough memory for an unbounded world. The "
+                            "current world was kept.")
+                      : std::format(
+                            "There is not enough memory for a {} world. The current "
+                            "world was kept.",
+                            sizeText(setup.world));
         wxMessageBox(toWx(message), "Load Pattern", wxOK | wxICON_ERROR, this);
         syncControls();
         updateStatusBar(true);
@@ -708,34 +837,89 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
         m_world.setAnts(setup.ants);  // before the switch, which would add an ant to an empty list
     }
     m_world.setAutomaton(setup.automaton);
-    m_world.setCells(pattern.cells, core::kAlive, setup.origin);
+    try
+    {
+        m_world.setCells(pattern.cells, core::kAlive, setup.origin);
+    }
+    catch (const std::bad_alloc&)
+    {
+        wxMessageBox("There is not enough memory for the whole pattern.", "Load Pattern",
+                     wxOK | wxICON_ERROR, this);
+    }
     if (setup.speed)
     {
         m_runner.setSpeed(*setup.speed);
     }
-    if (m_world.stepper().kind() == core::StepperKind::REFERENCE &&
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE &&
+        m_world.stepper().kind() == core::StepperKind::REFERENCE &&
         m_world.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
     {
         m_world.setStepper(core::makeStepper(core::StepperKind::BANDED));
     }
     if (setup.view)
     {
-        m_canvas->showCells(*setup.view);
+        m_canvas->showCells({.x0 = setup.view->x0,
+                             .y0 = setup.view->y0,
+                             .x1 = setup.view->x1,
+                             .y1 = setup.view->y1});
+    }
+    else if (unbounded)
+    {
+        m_canvas->fitWorld();  // the pattern, now that it is there
     }
     syncControls();
     worldContentChanged();
 }
 
-void MainFrame::applyRule(const core::Rule& rule)
+bool MainFrame::applyRule(const core::Rule& rule)
 {
+    if (m_world.kind() == core::WorldKind::UNBOUNDED && !core::HashLife::supports(rule))
+    {
+        m_panel->setRuleError(
+            "An unbounded world cannot run a rule with B0: every empty cell "
+            "of the plane would be born at once.");
+        return false;
+    }
+    m_runner.interrupt();
     m_world.setRule(rule);
     m_panel->setRule(rule);
+    updateStatusBar(true);
+    return true;
+}
+
+std::string MainFrame::unboundedRefusal() const
+{
+    if (m_world.automaton() != core::Automaton::LIFE)
+    {
+        return "Langton's ant needs a fixed-size world.";
+    }
+    if (!core::HashLife::supports(m_world.rule()))
+    {
+        return std::format(
+            "An unbounded world cannot run {}: with B0, every empty cell would be "
+            "born at once.",
+            m_world.rule().toString());
+    }
+    return {};
+}
+
+void MainFrame::setStepExponent(unsigned exponent)
+{
+    if (m_world.kind() == core::WorldKind::UNBOUNDED)
+    {
+        m_runner.setStepExponent(exponent);
+    }
+    syncControls();
     updateStatusBar(true);
 }
 
 void MainFrame::setAutomaton(core::Automaton automaton)
 {
-    m_world.setAutomaton(automaton);
+    // An unbounded world runs only Life; its menu item and choice are disabled anyway.
+    if (m_world.kind() == core::WorldKind::FIXED_SIZE || automaton == core::Automaton::LIFE)
+    {
+        m_world.setAutomaton(automaton);
+    }
     syncControls();
     worldContentChanged();  // the ants appear or disappear, so the canvas has to be redrawn
 }
@@ -758,23 +942,34 @@ void MainFrame::worldContentChanged()
 
 void MainFrame::syncControls()
 {
-    const bool         running = m_runner.isRunning();
-    const core::Speed  speed   = m_runner.speed();
-    const core::Extent extent  = m_world.extent();
-    const bool         torus   = m_world.topology() == core::Topology::TORUS;
+    const bool         running   = m_runner.isRunning();
+    const core::Speed  speed     = m_runner.speed();
+    const core::Extent extent    = m_world.extent();
+    const bool         torus     = m_world.topology() == core::Topology::TORUS;
+    const bool         unbounded = m_world.kind() == core::WorldKind::UNBOUNDED;
+    const unsigned     step      = m_runner.stepExponent();
     // Life reads the rule, the topology and the engine. The ant reads none of them, and has ants
-    // instead.
+    // instead. A plane runs only Life, with HashLife, and has no edges.
     const bool life = m_world.automaton() == core::Automaton::LIFE;
 
     // The rule text is left alone, so text the user is still editing survives.
     m_panel->setRunning(running);
+    m_panel->setWorldKind(m_world.kind());
     m_panel->setAutomaton(m_world.automaton());
     m_panel->setAntCount(static_cast<int>(m_world.ants().size()));
     m_panel->setSpeed(speed);
+    m_panel->setStepExponent(step);
     m_panel->setCellSize(m_canvas->cellSize());
     m_panel->setShowGrid(m_canvas->showGrid());
     m_panel->setWrap(torus);
-    m_panel->setWorldInfo(extent, core::worldBytes(extent));
+    if (!unbounded)
+    {
+        m_panel->setWorldInfo(extent, core::worldBytes(extent));
+    }
+    else if (!m_runner.busyFor())  // the node count is the worker's while a step runs
+    {
+        m_panel->setUnboundedInfo(m_world.plane().memoryBytes());
+    }
 
     wxMenuBar& menus = *GetMenuBar();
     menus.Check(ID_TOGGLE_MAX_SPEED, speed.unlimited);
@@ -782,12 +977,16 @@ void MainFrame::syncControls()
     menus.Check(ID_TOGGLE_WRAP, torus);
     menus.Check(automatonMenuItem(m_world.automaton()), true);  // radio items: the others turn off
     menus.Check(engineMenuItem(m_world.stepper().kind()), true);
-    menus.Enable(ID_ENGINE_BANDED, life);
-    menus.Enable(ID_ENGINE_REFERENCE,
-                 life && extent.cellCount() <= core::ReferenceStepper::kRecommendedMaxCells);
-    menus.Enable(ID_TOGGLE_WRAP, life);
+    menus.Enable(ID_AUTOMATON_ANT, !unbounded);
+    menus.Enable(ID_ENGINE_BANDED, life && !unbounded);
+    menus.Enable(
+        ID_ENGINE_REFERENCE,
+        life && !unbounded && extent.cellCount() <= core::ReferenceStepper::kRecommendedMaxCells);
+    menus.Enable(ID_TOGGLE_WRAP, life && !unbounded);
     menus.Enable(ID_FOCUS_RULE, life);
     menus.Enable(ID_RESET_ANTS, !life);
+    menus.Enable(ID_LARGER_STEP, unbounded && step < SimulationRunner::kMaxStepExponent);
+    menus.Enable(ID_SMALLER_STEP, unbounded && step > 0);
     menus.SetLabel(ID_RUN_PAUSE, running ? "&Pause\tF5" : "&Run\tF5");
 }
 
@@ -811,6 +1010,18 @@ void MainFrame::updateStatusBar(bool force)
         speedText = speed.unlimited ? std::format("Max ({} gen/s)", countText(std::llround(*rate)))
                                     : std::format("{} ({:.1f})", speedText, *rate);
     }
+    if (m_world.kind() == core::WorldKind::UNBOUNDED && m_runner.stepExponent() > 0)
+    {
+        speedText += std::format(" · step 2^{}", m_runner.stepExponent());
+    }
+    // A long step: the status says so, rather than seeming stuck.
+    const std::optional<core::Clock::duration> busy = m_runner.busyFor();
+    const bool  computing = busy && *busy >= SimulationRunner::kBusyReport;
+    std::string stateText = running ? "Running" : "Paused";
+    if (computing)
+    {
+        stateText = "Computing…";
+    }
 
     std::string viewText = m_hovered ? std::format("({}, {})", m_hovered->x, m_hovered->y) : "–";
     viewText += std::format(" · {} px", cellSize);
@@ -821,7 +1032,7 @@ void MainFrame::updateStatusBar(bool force)
     }
 
     const std::array<std::string, kStatusWidths.size()> fields{
-        running ? "Running" : "Paused",
+        stateText,
         std::format("Gen {}", core::formatCount(m_world.generation())),
         std::format("Pop {}", countText(m_world.population())),
         speedText,

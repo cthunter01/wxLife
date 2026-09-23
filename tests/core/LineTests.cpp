@@ -167,5 +167,19 @@ TEST(LineTest, LongLinesNeedWideArithmetic)
     EXPECT_EQ(lineProblem({kMin + 17, kMax}, {kMin + 17 + minor, kMax - major}), "");
 }
 
+TEST(LineTest, SixtyFourBitEndpointsWork)
+{
+    // An unbounded world's cells lie far beyond 32 bits.
+    constexpr std::int64_t   kFar = std::int64_t{1} << 40;
+    std::vector<UniversePos> cells;
+    forEachCellOnLine(UniversePos{.x = kFar, .y = -kFar},
+                      UniversePos{.x = kFar + 3, .y = -kFar + 1},
+                      [&](UniversePos p) { cells.push_back(p); });
+    EXPECT_EQ(cells, (std::vector<UniversePos>{{.x = kFar, .y = -kFar},
+                                               {.x = kFar + 1, .y = -kFar},
+                                               {.x = kFar + 2, .y = -kFar + 1},
+                                               {.x = kFar + 3, .y = -kFar + 1}}));
+}
+
 }  // namespace
 }  // namespace wxLife::core

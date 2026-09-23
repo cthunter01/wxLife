@@ -22,7 +22,8 @@ namespace wxLife::core
 /// pattern's cells are set at `origin`, and it starts at generation 0.
 struct PatternSetup
 {
-    Extent    world;
+    WorldKind kind = WorldKind::FIXED_SIZE;
+    Extent    world;   ///< For a fixed-size world
     CellPos   origin;  ///< Where the pattern's top-left corner goes.
     Topology  topology = Topology::BOUNDED;
     Rule      rule;
@@ -40,13 +41,15 @@ inline constexpr Coord kMinFileMargin = 50;
 /// @pre pattern is the demo's pattern; it fits the demo's world at the demo's origin.
 [[nodiscard]] PatternSetup demoSetup(const Demo& demo, const Pattern& pattern);
 
-/// A world for a pattern read from a file: the pattern in the middle, with kMinFileMargin or half
-/// its size of empty space around it, whichever is more, but no more than the side limit and the
-/// memory budget allow. The rule is the file's, or `currentRule` if it names none; the topology
-/// and the speed stay as they are.
-/// @return why not even the pattern itself fits.
+/// A world for a pattern read from a file. In a fixed-size world: the pattern in the middle of a
+/// new one, with kMinFileMargin or half its size of empty space around it, whichever is more, but
+/// no more than the side limit and the memory budget allow. In an unbounded world: the plane,
+/// cleared, with the pattern centred on (0, 0). The rule is the file's, or `currentRule` if it
+/// names none; the kind, the topology and the speed stay as they are.
+/// @return why not even the pattern itself fits a fixed-size world.
 [[nodiscard]] std::expected<PatternSetup, ExtentError> fileSetup(const Pattern& pattern,
                                                                  const Rule&    currentRule,
+                                                                 WorldKind      currentKind,
                                                                  Topology       currentTopology,
                                                                  std::uint64_t  memoryBudgetBytes);
 

@@ -71,8 +71,8 @@ TEST(PatternSetupTest, AFileGetsRoomAroundIt)
     const Rule current = Rule::parse("B36/S23").value();
 
     // At least kMinFileMargin on each side.
-    const auto small =
-        fileSetup(blank({.width = 3, .height = 3}), current, Topology::TORUS, kLargeBudget);
+    const auto small = fileSetup(blank({.width = 3, .height = 3}), current, WorldKind::FIXED_SIZE,
+                                 Topology::TORUS, kLargeBudget);
     ASSERT_TRUE(small.has_value());
     EXPECT_EQ(small->world, (Extent{103, 103}));
     EXPECT_EQ(small->origin, (CellPos{50, 50}));
@@ -84,9 +84,10 @@ TEST(PatternSetupTest, AFileGetsRoomAroundIt)
     EXPECT_EQ(small->automaton, Automaton::LIFE);
 
     // Half the pattern's size on each side, once that is more.
-    Pattern large  = blank({.width = 400, .height = 200});
-    large.rule     = Rule{};
-    const auto big = fileSetup(large, current, Topology::BOUNDED, kLargeBudget);
+    Pattern large = blank({.width = 400, .height = 200});
+    large.rule    = Rule{};
+    const auto big =
+        fileSetup(large, current, WorldKind::FIXED_SIZE, Topology::BOUNDED, kLargeBudget);
     ASSERT_TRUE(big.has_value());
     EXPECT_EQ(big->world, (Extent{800, 400}));
     EXPECT_EQ(big->origin, (CellPos{200, 100}));
@@ -94,12 +95,13 @@ TEST(PatternSetupTest, AFileGetsRoomAroundIt)
     EXPECT_EQ(big->topology, Topology::BOUNDED);
 
     // No more than the side limit, and an empty pattern gets an empty world of margins.
-    const auto wide =
-        fileSetup(blank({.width = 99'000, .height = 10}), current, Topology::TORUS, kLargeBudget);
+    const auto wide = fileSetup(blank({.width = 99'000, .height = 10}), current,
+                                WorldKind::FIXED_SIZE, Topology::TORUS, kLargeBudget);
     ASSERT_TRUE(wide.has_value());
     EXPECT_EQ(wide->world, (Extent{kMaxWorldSide, 110}));
     EXPECT_EQ(wide->origin.x, 500);
-    const auto empty = fileSetup(Pattern{}, current, Topology::TORUS, kLargeBudget);
+    const auto empty =
+        fileSetup(Pattern{}, current, WorldKind::FIXED_SIZE, Topology::TORUS, kLargeBudget);
     ASSERT_TRUE(empty.has_value());
     EXPECT_EQ(empty->world, (Extent{100, 100}));
 }
@@ -109,23 +111,36 @@ TEST(PatternSetupTest, TheMarginsShrinkToFitTheBudget)
     // 1000 × 1000 wants 500 on each side. The margins halve until the world fits 1100 × 1100:
     // 500, 250, 125 and 62 are too many, 31 is not.
     const Pattern pattern = blank({.width = 1000, .height = 1000});
-    const auto    setup =
-        fileSetup(pattern, Rule{}, Topology::TORUS, worldBytes({.width = 1100, .height = 1100}));
+    const auto    setup   = fileSetup(pattern, Rule{}, WorldKind::FIXED_SIZE, Topology::TORUS,
+                                      worldBytes({.width = 1100, .height = 1100}));
     ASSERT_TRUE(setup.has_value());
     EXPECT_EQ(setup->world, (Extent{1062, 1062}));
     EXPECT_EQ(setup->origin, (CellPos{31, 31}));
 
     // Just the pattern, without any room around it.
-    const auto tight =
-        fileSetup(pattern, Rule{}, Topology::TORUS, worldBytes({.width = 1000, .height = 1000}));
+    const auto tight = fileSetup(pattern, Rule{}, WorldKind::FIXED_SIZE, Topology::TORUS,
+                                 worldBytes({.width = 1000, .height = 1000}));
     ASSERT_TRUE(tight.has_value());
     EXPECT_EQ(tight->world, (Extent{1000, 1000}));
 
     // Not even that.
-    const auto none =
-        fileSetup(pattern, Rule{}, Topology::TORUS, worldBytes({.width = 999, .height = 999}));
+    const auto none = fileSetup(pattern, Rule{}, WorldKind::FIXED_SIZE, Topology::TORUS,
+                                worldBytes({.width = 999, .height = 999}));
     ASSERT_FALSE(none.has_value());
     EXPECT_EQ(none.error(), ExtentError::OVER_MEMORY_BUDGET);
+}
+
+TEST(PatternSetupTest, AFileOnAPlaneIsCentredOnTheOrigin)
+{
+    Pattern highLife = blank({.width = 400, .height = 201});
+    highLife.rule    = Rule::parse("B36/S23").value();
+    const auto setup = fileSetup(highLife, Rule{}, WorldKind::UNBOUNDED, Topology::TORUS, 0);
+    ASSERT_TRUE(setup.has_value());  // no size, so no budget to fit
+    EXPECT_EQ(setup->kind, WorldKind::UNBOUNDED);
+    EXPECT_EQ(setup->origin, (CellPos{-200, -100}));
+    EXPECT_EQ(setup->rule.toString(), "B36/S23");
+    EXPECT_FALSE(setup->view.has_value());
+    EXPECT_FALSE(setup->speed.has_value());
 }
 
 }  // namespace

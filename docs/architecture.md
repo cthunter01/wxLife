@@ -64,8 +64,8 @@ Every other place that shows one of these values is only a view of it.
 
 | State | Owner |
 |---|---|
-| Cells, automaton, ants, rule, topology, engine, generation, population | `core::World`, held by `app::LifeApp` |
-| Running flag, speed, pacing, measured rate | `ui::SimulationRunner`, a member of `MainFrame` |
+| World kind, cells (a grid or a HashLife plane), automaton, ants, rule, topology, engine, generation, population | `core::World`, held by `app::LifeApp` |
+| Running flag, speed, step size, pacing, measured rate, the step running in the background | `ui::SimulationRunner`, a member of `MainFrame` |
 | Cell size, scroll offset, grid-line flag, colours | `ui::WorldCanvas`, through `render::Viewport` and `render::RenderStyle` (colours from `wxLife/ui/Theme.h`) |
 | Random-fill density, rule text being edited, preset selection | The `ui::ControlPanel` widgets |
 | Memory budget | `MainFrame`, computed once with `core::defaultMemoryBudget()` |
@@ -75,7 +75,9 @@ Every other place that shows one of these values is only a view of it.
 **Only two classes change the World,** and both run on the UI thread:
 - `MainFrame` changes it in response to user commands: clear, randomize, `setCells`, resize, rule,
   topology, engine, and loading a pattern (`loadPattern()`).
-- `SimulationRunner` changes it by calling `World::step()`.
+- `SimulationRunner` changes it by calling `World::step()` on a fixed-size world and
+  `World::stepPlane()` on an unbounded one. The second call runs on a worker thread; see Unbounded
+  worlds below for the rules that makes necessary.
 
 `WorldCanvas` only reads the World. It hands mouse strokes to `MainFrame` through its `paintCells`
 callback.
@@ -151,7 +153,8 @@ lists every place a third automaton would need.
 - Bands read `src` and write different rows of `dst`, so they need no locks.
 
 Because every call joins its threads before it returns, the UI thread is the only thread that ever sees
-the World. The UI therefore needs no synchronisation.
+a fixed-size World. The one exception is the HashLife step of an unbounded world, which
+`SimulationRunner` runs on a thread of its own (see Unbounded worlds below).
 
 Starting the threads on every step keeps the code simple, and it is fast enough:
 
@@ -201,8 +204,8 @@ The pacer and the meter take the time as an argument, so their tests never sleep
 ## HashLife (`core`)
 
 `HashLife` (`wxLife/core/HashLife.h`) runs a B/S rule on an unbounded plane with Bill Gosper's
-algorithm. It is the engine behind the unbounded worlds the UI will offer; so far it stands on its own
-and only the tests use it.
+algorithm. It is the engine behind the unbounded worlds (next section), and it knows nothing of them:
+it only takes cells, rules and steps.
 
 **The quadtree.** A node of level k is a 2^k × 2^k square: four children one level down (NW, NE, SW,
 SE), or a single cell at level 0. Nodes are hash-consed, so each distinct square exists once and is
@@ -229,7 +232,23 @@ Level 2 is the base case, a 65,536-entry table from 4 × 4 cells to the centre 2
 `collectGarbage()` keeps what the root needs, moves the survivors down in id order (children are
 always older than their parents, so one pass renumbers everything) and forgets every result. A step
 that runs out of nodes throws internally, is undone, collects and tries once more; then it reports
-`OUT_OF_MEMORY` and nothing has changed, and a smaller step may still fit.
+`OUT_OF_MEMORY` and nothing has changed, and a smaller step may still fit. The chunks are only ever
+added, into a table of chunk slots sized once for the budget, so a node never moves except in
+`collectGarbage()`.
+
+**Stepping on another thread.** `step()` takes `HashLifeStepOptions`:
+- `cancel` points at a flag that `successor()` checks at every node of level 6 or more. Once it is
+  set, the step throws internally, is undone as for a lack of memory, and reports `CANCELLED`. The
+  results it has already worked out stay, so the next step starts ahead.
+- `collectGarbage = false` forbids the step to collect: it reports `OUT_OF_MEMORY` at once, and the
+  owner collects between steps. Collecting moves nodes, which readers on other threads must never see.
+
+With both, one thread may step while others read `population()`, `generation()`, `at()`, `bounds()`
+and `forEachBlock()`. They see the plane before the step until it publishes its new root and
+generation, both atomic, and the plane after it from then on. A step only appends nodes nobody can
+reach yet and writes the remembered results, which readers never look at. The node count and
+`memoryBytes()` belong to the stepping thread while it runs. `HashLifeTest` runs a step against three
+reading threads, and the `tsan` preset checks that under ThreadSanitizer.
 
 **Editing and reading.** `setCells()` builds a quadtree of the new cells and unites it with the
 plane (or subtracts it, to erase). `forEachBlock()` visits the 2^s × 2^s blocks that hold a live cell
@@ -240,6 +259,60 @@ pixel. `bounds()` finds the extreme live cells, remembering each shared node's a
 1,272 output spaceships are then exactly the primes up to 10,369, where a bounded world goes wrong
 after 67. The Gosper gun jumps 2^20 generations in 5 ms. Chaotic soups gain nothing: for them the
 dense engine is faster.
+
+## Unbounded worlds (`World`, `SimulationRunner`, `Viewport`)
+
+**Two kinds of world.** `WorldKind` is `FIXED_SIZE` or `UNBOUNDED`. A fixed-size `World` holds its two
+grids; an unbounded one holds a `HashLife` (`m_plane`) instead, and its grids are released.
+- `makeUnbounded(keepPattern, budget)` turns a world into a plane, the grid's centre cell landing at
+  (0, 0); `resize()` turns a plane back into a grid, the plane's (0, 0) becoming the grid's centre cell.
+  Both keep the generation when they keep the pattern, and both have the strong exception guarantee.
+- The plane gets the same memory budget as a grid would, as a node limit.
+- A plane runs only Life, and only rules without B0, which would fill the plane in one generation.
+  `MainFrame::applyRule()` refuses a B0 rule with the panel's error line, and `WorldSizeDialog` refuses
+  Unbounded for B0 rules and for Langton's ant with the reason (`MainFrame::unboundedRefusal()`). The
+  ant, Wrap Edges and the engines are greyed out while a plane runs.
+- Positions of cells are `UniversePos` (64-bit) wherever the UI talks about cells: the canvas callbacks,
+  the hovered cell, strokes (`forEachCellOnLine()` is a template over both position types) and
+  `World::setCells(span<const UniversePos>)`. `World::cellAt()` reads any cell of either kind.
+- Randomize fills the cells the view shows (at most `kMaxWorldSide` on a side), since a plane has no
+  whole to fill. File → Open into a plane keeps the plane and centres the pattern on (0, 0)
+  (`fileSetup()` takes the current kind). Demos bring the fixed-size worlds they were tuned for.
+
+**Stepping.** A plane steps 2^k generations at a time, where k is the step exponent the user sets (the
+panel's Step box, F7 and F8, `{` and `}`; at most `SimulationRunner::kMaxStepExponent`, 40). Every
+step runs on a worker thread, so a step of seconds or minutes never blocks the UI:
+1. `launchStep()` collects garbage on the UI thread if the plane is full (`World::collectIfFull()`),
+   then starts a `std::thread` that calls `stepPlane(k, {.cancel, .collectGarbage = false})`, stores
+   the result and sets `m_finished` (release). If no thread can be started, it steps right there.
+2. The one-shot timer keeps ticking, but a tick now only checks `m_finished` (acquire). While the step
+   runs, a tick every `kBusyReport` (250 ms) reports zero generations, so the status bar can say
+   "Computing…".
+3. When the step has finished, the next tick joins the thread, commits 2^k generations to the pacer
+   and the rate meter, reports them, and starts the next step if the pacer says it is due.
+   `GenerationPacer::setStepSize()` lets the debt grow to at least one step, so a step of 2^20
+   generations comes due even at 1 generation per second (after 2^20 seconds).
+4. `OUT_OF_MEMORY`: the runner collects garbage on the UI thread and tries the step once more. If that
+   fails too, or the pattern reached the edge of the universe, the runner stops and `MainFrame` shows
+   the reason in a "Simulation Stopped" box.
+
+While a step runs, the UI thread only reads the world: painting, the status bar, the hovered cell. Every
+command that changes the world calls `SimulationRunner::interrupt()` or `stop()` first, which sets the
+cancel flag and joins the worker; a cancelled step changes nothing. Running then goes on at the next
+tick. The panel's memory line (`memoryBytes()`) is refreshed only between steps, because the node count
+belongs to the worker while a step runs.
+
+**The view.** `Viewport::setUnbounded()` removes the edges: the offset may go `kUnboundedReach` (2^55)
+content pixels either way from (0, 0), which keeps every product in the zoom arithmetic within 64 bits
+and still spans 3.6 × 10^16 cells at 1 px. `cellAt()`, `cellAtClamped()`, `cellOrigin()` and
+`visibleCells()` use `UniversePos` and `UniverseRect`. Fit shows the plane's bounding box (an empty
+plane is centred on (0, 0)), and Center World centres it. The scrollbars stay visible, so the canvas
+keeps its size, but they do nothing on a plane.
+
+**Rendering.** `Rasterizer::render(const HashLife&, …)` copies the visible cells into a window `Grid`
+(`m_window`, kept between frames) with `forEachBlock()`, then paints that grid with the same stamps and
+row copies as a fixed-size world, with the window's corner as its origin. The cost is the canvas plus
+the live cells in view; empty space is skipped by the quadtree.
 
 ## Patterns and demos (`core`, `DemoDialog`)
 
@@ -385,8 +458,13 @@ timer tick → SimulationRunner::onTimer → m_pacer.plan(now) → m_world.step(
   → m_pacer.commit(N), m_meter.record(N, now) → MainFrame::onSimulationTick
   → m_canvas->Refresh(false) + updateStatusBar(false) → scheduleNext() (idle gap ≥ 4 ms)
 
+timer tick, unbounded → SimulationRunner::stepInBackground → step finished? (m_finished)
+  → no: report 0 generations every 250 ms ("Computing…") → scheduleNext()
+  → yes: join → m_pacer.commit(2^k) → MainFrame::onSimulationTick → due? launchStep()
+    → collectIfFull() → std::thread: m_world.stepPlane(k, cancel, no collection) → scheduleNext()
+
 GTK frame clock → WorldCanvas::onPaint → syncCanvasSize()
-  → Rasterizer::render(world.cells(), viewport, style, frame)
+  → Rasterizer::render(world.cells(), viewport, style, frame), or render(world.plane(), …)
   → in ant mode, render::drawAnts(world.ants(), viewport, style, frame) over it
   → wxImage (borrowed bytes) → wxBitmap(image, depth, scale) → DrawBitmap
 
@@ -424,13 +502,15 @@ G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
 
 **Resizing the world** (`MainFrame::onWorldSize`):
 1. Remember whether the simulation was running, stop it, and cancel any stroke.
-2. Call `WorldSizeDialog::ask()`, passing the current size, `cellsThatFit()` for the "Fit window"
-   preset, and the budget. The dialog checks the typed text of both boxes, not `wxSpinCtrl`'s clamped
-   value, and its `Validate()` refuses OK and Enter until the size is valid.
-3. Check the size again with `validateExtent()`. Inside a `try` block, call `m_world.resize()`, then
-   `m_canvas->worldExtentChanged()` at once, so no paint ever sees a viewport with the old extent. On
-   `std::bad_alloc`, show a message: the old world is still intact. (Under Linux's default overcommit
-   this is rare; see `validateExtent()` above.)
+2. Call `WorldSizeDialog::ask()`, passing the current kind and size, `cellsThatFit()` for the "Fit
+   window" preset, the budget, and why an unbounded world is impossible, if it is
+   (`unboundedRefusal()`). The dialog checks the typed text of both boxes, not `wxSpinCtrl`'s clamped
+   value, and its `Validate()` refuses OK and Enter until the size, or the choice of Unbounded, is
+   valid.
+3. Check the answer again with `validateExtent()`, or the refusal. Inside a `try` block, call
+   `m_world.resize()` or `m_world.makeUnbounded()`, then `m_canvas->worldExtentChanged()` at once, so no
+   paint ever sees a viewport with the old extent or kind. On `std::bad_alloc`, show a message: the old
+   world is still intact. (Under Linux's default overcommit this is rare; see `validateExtent()` above.)
 4. If the Reference engine is active and the world is now larger than
    `ReferenceStepper::kRecommendedMaxCells`, switch to Banded.
 5. Restart the simulation if it was running, then call `syncControls()` and `updateStatusBar(true)`.
@@ -508,7 +588,9 @@ whatever the machine can manage. A paused app uses no CPU, because the timer is 
 | 10000², Max | 2 (about 5.5 ms each) | Measured headlessly: 90 to 116 gen/s at 43 to 50 repaints per second; input stays responsive |
 | One generation takes 10 ms or more (here from about 14000², 200 million cells) | 1 | Fewer repaints, but input is still handled between ticks |
 
-The last row is the limit of stepping on the UI thread. Background stepping is an extension point.
+The last row is the limit of stepping on the UI thread, which fixed-size worlds still do. Unbounded
+worlds step on a worker thread instead, one step of 2^k generations at a time; the tick then only
+checks whether that step has finished (see Unbounded worlds above).
 
 ## wx and GTK pitfalls handled in the code
 
@@ -564,7 +646,12 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
   It also checks the textbook facts an unbounded plane gives: the R-pentomino's 116 cells at 1103, the
   acorn's 633 at 5206, the Gosper gun's population after 2^20 generations, and the Primer's first 95
   primes read off its output spaceships. Further tests cover positions near 2^60, the edge of the
-  universe, running out of memory and garbage collection.
+  universe, running out of memory and garbage collection, a cancelled step, a step that must leave the
+  collection to its owner, and three threads drawing the plane while a step runs.
+- **`WorldTest`** also covers the unbounded kind: a grid becoming a plane and back with its pattern and
+  generation, rules and edits on a plane, randomizing an area, and far cells that must not wrap into a
+  grid. **`ViewportTest`** checks the unbounded view and its reach, and **`RasterizerTest`** checks that
+  a plane looks pixel for pixel like a grid with the same cells, at cell sizes from 1 to 16 px.
 - **`PatternTest`** reads RLE and plaintext text, including the tolerances real files need (CRLF, runs
   split by white space and line ends, a missing `!`, every rule spelling), and every error with its line.
   **`PatternSetupTest`** covers the demo and file setups, including the margins shrinking to the budget.
@@ -582,7 +669,9 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
   number boxes through GTK, and answers dialogs with a `wxModalDialogHook`. wx starts in the suite's
   `SetUpTestSuite()`, so only the processes that run these tests start GTK. The tests run one at a time.
   They are skipped when no display is configured, and they fail when a configured display cannot be
-  opened.
+  opened. `RunsUnboundedWorlds` turns the world into a plane in the size dialog, opens a glider into
+  it, steps it 2^10 and runs it at 2^20 generations a step, draws, randomizes, is refused a B0 rule,
+  and goes back to a fixed size.
 - **Checks outside GoogleTest.** CTest also runs `layering` and `static_link` (`ldd`, `otool -L` or
   `dumpbin /dependents` must list no wxWidgets library for `wxLife`). Configuring already fails if `wx::core` or `wx::base` is not the static library
   built from the fetched sources.
@@ -602,11 +691,12 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
 | More B/S presets | `kRulePresets` | One line per preset. The parser is `constexpr`, so a typo fails to compile. |
 | New engines (bit-packed rows, explicit SIMD, skipping empty rows) | `Stepper`, `StepperKind`, `kStepperKinds`, `makeStepper()`, `kernel::stepRow()`, `wxLife_bench --engine` | Add a class, an enum value, a `kStepperKinds` entry and a `makeStepper()` case. `-Wswitch` then points at the other switches that need a case: `toString(StepperKind)`, the benchmark's `bandCount()` and `engineMenuItem()` in `src/ui/MainFrame.cpp`. The pattern tests in `StepperTest` pick the engine up from `kStepperKinds`; add it to the comparison with `ReferenceStepper` there. In the UI: a `CommandId`, a radio item in `buildMenuBar()` and a handler row in `bindCommands()`. |
 | Persistent thread pool | `forEachBand()` is the only code that creates threads | Replace its body; nothing else changes. A quick prototype pool stepped 1000² in 0.15 ms with 2 bands (0.38 ms with threads started per step) and in 0.09 ms with 4, so `suggestedBandCount()` could then split smaller worlds too. |
-| Background stepping (worlds of more than about 200 million cells on this machine) | `SimulationRunner` is the only caller of `World::step()`, and painting reads only `World::cells()` | Step a copy on a background `std::thread` and hand finished grids to the canvas. This stays inside `ui/`, plus a small `core` helper. |
+| Background stepping for fixed-size worlds (more than about 200 million cells on this machine) | `SimulationRunner` already steps planes on a worker thread (`launchStep()`, `finishStep()`, `cancelStep()`); painting a grid reads only `World::cells()` | Step into the spare grid on the worker and swap on the UI thread when it is done. A grid step cannot be undone halfway, so cancelling would have to wait for it or step a copy. |
 | Other rule families (Generations, Larger than Life) | Only the steppers interpret a `Rule`; the rest of the code only parses, prints and compares it. `Cell` is a byte. | Make `Rule` a `std::variant` and give each family its own stepper, plus a case in `Rule::toString()`, `findPreset()` and the preset list. The rasterizer would need colours for the extra states. |
 | More automata (other turmites, multi-state ants) | `Automaton`, `kAutomata` and the `default`-less switch in `World::step()`; `wxLife/core/Ant.h` holds the ant's own rule | Add an enum value and a `kAutomata` entry; `-Wswitch` then points at the four switches that need a case: `toString(Automaton)`, `World::step()`, and `worldText()` and `automatonMenuItem()` in `src/ui/MainFrame.cpp`. The panel's choice is built from `kAutomata`, so it needs no change. Multi-state cells would additionally break the binary assumptions listed in the row above. With a third automaton it is time to extract an interface from `World` instead of widening the switch. |
 | Other topologies (cylinder, Klein bottle) | `Topology` and `kTopologies`. `-Wswitch` lists the `core` code that needs a case: `toString(Topology)`, `Grid::updateBorder()` and the `alive` lambda in `ReferenceStepper::step()`. | Add an enum value, a `kTopologies` entry and a copy rule; `StepperTest` and `WorldTest` then cover it. The Wrap Edges toggle in `MainFrame` would become a choice. |
-| Unbounded worlds in the UI | `HashLife`, tested on its own; the UI uses only `World`'s public interface | Extract an interface from `World` with a dense and a HashLife implementation. `Rasterizer::render()` takes the dense `Grid` from `World::cells()`, so it would read cells through the new interface too. `Viewport` would need an unbounded extent. It would bring the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and let the prime calculators run without their streams hitting an edge; `readPattern()` would then need macrocell files. |
+| Macrocell files, giant demos | Unbounded worlds; `readPattern()`; `PatternSetup::kind` | A macrocell reader that builds HashLife nodes directly, and demos with `kind = UNBOUNDED`. That brings the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and lets the prime calculators run without their streams hitting an edge. |
+| A third kind of world, or HashLife for more automata | `WorldKind`, the `kind()` branches in `World`, `WorldCanvas` and `MainFrame` | With a third kind it is time to extract an interface from `World` with one implementation per kind, rather than more branches. |
 | Zooming out below 1 px, a minimap | `Viewport` (`int` cell size) and `Rasterizer` | Replace the cell size with a scale type, and add a downsampling path. |
 | More demos | `patterns/`, `demo_patterns` in `src/CMakeLists.txt`, `kDemos` in `src/core/Demo.cpp` | Add the file, list it, and add a `Demo`; `DemoTest` checks the rest. `patterns/README.md` has the steps. |
 | Saving patterns, more file formats | `readPattern()`, `MainFrame::openPatternFile()` | An RLE writer next to the reader and File → Save. Life 1.06 would be a third reader behind the same format check. |
@@ -630,8 +720,10 @@ Headers are in `include/wxLife/`, sources in `src/`.
 8. `core/Pacer.h`, `core/Pacer.cpp`: turning wall time into generations.
 9. `render/Viewport.h`, `render/Viewport.cpp`: the camera, clamping and anchored zoom.
 10. `render/Rasterizer.cpp`: cell stamps and row copying.
-11. `ui/SimulationRunner.cpp`: the one-shot timer.
+11. `ui/SimulationRunner.cpp`: the one-shot timer, and the worker thread that steps planes.
 12. `ui/WorldCanvas.cpp`: painting, scrollbars, mouse and keys.
 13. `ui/MainFrame.cpp`: the command table, syncing the controls, and the status bar.
 14. `core/Pattern.cpp`, `core/Demo.cpp`, `core/PatternSetup.cpp`: reading pattern files, the demo
     catalogue, and what loading one does; then `MainFrame::loadPattern()`.
+15. `core/HashLife.h`, `core/HashLife.cpp`: the quadtree, `successor()`, and the rules that let one
+    thread step while others draw.

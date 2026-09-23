@@ -10,6 +10,7 @@
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Grid.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
@@ -62,29 +63,30 @@ void fillPixels(Bytes run, Rgb color) noexcept
 // Where the world lands on the canvas in this frame.
 struct Layout
 {
-    PixelSize      canvas{};
-    int            cellSize = 1;
-    PixelPoint     offset{};
-    core::CellRect cells{};  // visible cells
-    bool           gridLines  = false;
-    int            majorEvery = 0;  // 0 or less: no major lines
+    PixelSize          canvas{};
+    int                cellSize = 1;
+    PixelPoint         offset{};
+    core::UniverseRect cells{};  // visible cells
+    bool               gridLines  = false;
+    int                majorEvery = 0;  // 0 or less: no major lines
     // Canvas columns [left, right) and rows [top, bottom) show the world.
     Pixel left   = 0;
     Pixel right  = 0;
     Pixel top    = 0;
     Pixel bottom = 0;
 
-    [[nodiscard]] Pixel cellLeft(core::Coord cx) const noexcept
+    [[nodiscard]] Pixel cellLeft(core::UniverseCoord cx) const noexcept
     {
         return (Pixel{cx} * cellSize) - offset.x;
     }
-    [[nodiscard]] Pixel cellTop(core::Coord cy) const noexcept
+    [[nodiscard]] Pixel cellTop(core::UniverseCoord cy) const noexcept
     {
         return (Pixel{cy} * cellSize) - offset.y;
     }
 
     // Whether the grid line in the last pixel column (or row) of cell column (or row) c is major.
-    [[nodiscard]] bool majorLineAfter(core::Coord c) const noexcept
+    // C++'s remainder keeps the sign, so the lines fall on multiples left of the centre too.
+    [[nodiscard]] bool majorLineAfter(core::UniverseCoord c) const noexcept
     {
         return gridLines && majorEvery > 0 && (c + 1) % majorEvery == 0;
     }
@@ -125,7 +127,7 @@ void buildGridRow(std::vector<std::uint8_t>& row, const Layout& layout, Rgb line
     fillPixels(pixels(Bytes(row), 0, layout.left), outside);
     fillPixels(pixels(Bytes(row), layout.left, layout.right), line);
     fillPixels(pixels(Bytes(row), layout.right, layout.canvas.width), outside);
-    for (core::Coord cx = layout.cells.x0; cx < layout.cells.x1; ++cx)
+    for (core::UniverseCoord cx = layout.cells.x0; cx < layout.cells.x1; ++cx)
     {
         const Pixel x = layout.cellLeft(cx) + layout.cellSize - 1;
         if (layout.majorLineAfter(cx) && x < layout.canvas.width)
@@ -139,14 +141,15 @@ void buildGridRow(std::vector<std::uint8_t>& row, const Layout& layout, Rgb line
 // with random cells at 2 px, a branch per cell doubled the frame time.
 using Stamps = std::array<std::array<ConstBytes, 2>, 2>;
 
-// Paints one pixel row through cell row `cellRow`, leaving out its horizontal grid line.
-void drawScanline(Bytes scan, std::span<const core::Cell> cellRow, const Layout& layout,
-                  const Stamps& stamps, const RenderStyle& style)
+// Paints one pixel row through cell row `cellRow`, whose first cell is world column `firstColumn`,
+// leaving out its horizontal grid line.
+void drawScanline(Bytes scan, std::span<const core::Cell> cellRow, core::UniverseCoord firstColumn,
+                  const Layout& layout, const Stamps& stamps, const RenderStyle& style)
 {
     fillPixels(pixels(scan, 0, layout.left), style.outside);
     fillPixels(pixels(scan, layout.right, layout.canvas.width), style.outside);
     const auto visible =
-        cellRow.subspan(static_cast<std::size_t>(layout.cells.x0),
+        cellRow.subspan(static_cast<std::size_t>(layout.cells.x0 - firstColumn),
                         static_cast<std::size_t>(layout.cells.x1 - layout.cells.x0));
 
     if (layout.cellSize == 1)
@@ -166,7 +169,7 @@ void drawScanline(Bytes scan, std::span<const core::Cell> cellRow, const Layout&
         return;
     }
 
-    core::Coord cx = layout.cells.x0;
+    core::UniverseCoord cx = layout.cells.x0;
     for (const core::Cell cell : visible)
     {
         const auto major = static_cast<std::size_t>(layout.majorLineAfter(cx));
@@ -189,7 +192,36 @@ void drawScanline(Bytes scan, std::span<const core::Cell> cellRow, const Layout&
 void Rasterizer::render(const core::Grid& grid, const Viewport& viewport, const RenderStyle& style,
                         PixelBuffer& out)
 {
-    assert(viewport.worldExtent() == grid.extent());
+    assert(!viewport.unbounded() && viewport.worldExtent() == grid.extent());
+    paint(grid, {}, viewport, style, out);
+}
+
+void Rasterizer::render(const core::HashLife& plane, const Viewport& viewport,
+                        const RenderStyle& style, PixelBuffer& out)
+{
+    assert(viewport.unbounded());
+    const core::UniverseRect visible = viewport.visibleCells();
+    const core::Extent       extent{.width  = static_cast<core::Coord>(visible.x1 - visible.x0),
+                                    .height = static_cast<core::Coord>(visible.y1 - visible.y0)};
+    if (m_window.extent() == extent)
+    {
+        m_window.clear();
+    }
+    else
+    {
+        m_window = core::Grid(extent);
+    }
+    plane.forEachBlock(visible, 0, [&](core::UniversePos cell) {
+        m_window.set({.x = static_cast<core::Coord>(cell.x - visible.x0),
+                      .y = static_cast<core::Coord>(cell.y - visible.y0)},
+                     core::kAlive);
+    });
+    paint(m_window, {.x = visible.x0, .y = visible.y0}, viewport, style, out);
+}
+
+void Rasterizer::paint(const core::Grid& grid, core::UniversePos origin, const Viewport& viewport,
+                       const RenderStyle& style, PixelBuffer& out)
+{
     out.resize(viewport.canvasSize());
     const Layout layout = makeLayout(viewport, style);
     if (layout.cells.empty())  // also an empty canvas
@@ -217,7 +249,7 @@ void Rasterizer::render(const core::Grid& grid, const Viewport& viewport, const 
                      style.outside);
     }
 
-    for (core::Coord cy = layout.cells.y0; cy < layout.cells.y1; ++cy)
+    for (core::UniverseCoord cy = layout.cells.y0; cy < layout.cells.y1; ++cy)
     {
         // Cell row cy covers pixel rows [cellTop, lineRow]; with grid lines, lineRow is the line.
         const Pixel cellTop = layout.cellTop(cy);
@@ -231,7 +263,8 @@ void Rasterizer::render(const core::Grid& grid, const Viewport& viewport, const 
         if (first < bodyEnd)
         {
             const Bytes scan = out.row(first);
-            drawScanline(scan, grid.row(cy), layout, stamps, style);
+            drawScanline(scan, grid.row(static_cast<core::Coord>(cy - origin.y)), origin.x, layout,
+                         stamps, style);
             for (Pixel y = first + 1; y < bodyEnd; ++y)
             {
                 std::ranges::copy(scan, out.row(y).begin());

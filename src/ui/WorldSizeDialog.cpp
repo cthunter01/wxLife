@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -87,11 +88,12 @@ constexpr std::string_view kNotWholeNumbers = "Width and height must be whole nu
 
 }  // namespace
 
-std::optional<WorldSizeRequest> WorldSizeDialog::ask(wxWindow* parent, core::Extent current,
-                                                     core::Extent  fitsCanvas,
-                                                     std::uint64_t memoryBudgetBytes)
+std::optional<WorldSizeRequest> WorldSizeDialog::ask(wxWindow* parent, core::WorldKind kind,
+                                                     core::Extent current, core::Extent fitsCanvas,
+                                                     std::uint64_t    memoryBudgetBytes,
+                                                     std::string_view unboundedRefusal)
 {
-    WorldSizeDialog dialog(parent, current, fitsCanvas, memoryBudgetBytes);
+    WorldSizeDialog dialog(parent, kind, current, fitsCanvas, memoryBudgetBytes, unboundedRefusal);
     if (dialog.ShowModal() != wxID_OK)
     {
         return std::nullopt;
@@ -99,14 +101,25 @@ std::optional<WorldSizeRequest> WorldSizeDialog::ask(wxWindow* parent, core::Ext
     return dialog.request();
 }
 
-WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::Extent fitsCanvas,
-                                 std::uint64_t memoryBudgetBytes)
+WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::WorldKind kind, core::Extent current,
+                                 core::Extent fitsCanvas, std::uint64_t memoryBudgetBytes,
+                                 std::string_view unboundedRefusal)
   : wxDialog(parent, wxID_ANY, "World Size"),
     m_fitsCanvas(fitsCanvas),
     m_budget(memoryBudgetBytes),
-    m_width(makeSideSpin(this, current.width)),
-    m_height(makeSideSpin(this, current.height))
+    m_unboundedRefusal(unboundedRefusal)
 {
+    m_fixed     = new wxRadioButton(this, wxID_ANY, "Fixed size", wxDefaultPosition, wxDefaultSize,
+                                    wxRB_GROUP);
+    m_unbounded = new wxRadioButton(this, wxID_ANY, "Unbounded (HashLife)");
+    m_unbounded->SetToolTip(
+        "A plane without edges, which HashLife steps up to 2^40 generations at "
+        "a time");
+    // An unbounded world has no size of its own; its boxes start at what fits the window.
+    const core::Extent sides = kind == core::WorldKind::UNBOUNDED ? fitsCanvas : current;
+    m_width                  = makeSideSpin(this, sides.width);
+    m_height                 = makeSideSpin(this, sides.height);
+    (kind == core::WorldKind::UNBOUNDED ? m_unbounded : m_fixed)->SetValue(true);
     wxArrayString presetNames;
     presetNames.Add(toWx("Choose…"));
     for (const core::Coord side : kSquareSides)
@@ -122,13 +135,20 @@ WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::E
 
     // Start with the widest texts revalidate() can write, so the fitted dialog has room for them.
     const core::Extent largest{.width = core::kMaxWorldSide, .height = core::kMaxWorldSide};
-    m_memory = new wxStaticText(
-        this, wxID_ANY, toWx(memoryText(core::formatBytes(core::worldBytes(largest)), m_budget)));
-    const std::array<std::string, 4> errors{
+    const std::array<std::string, 2> memoryTexts{
+        memoryText(core::formatBytes(core::worldBytes(largest)), m_budget),
+        std::format("Memory: grows with the pattern, up to {}", core::formatBytes(m_budget))};
+    const auto memoryWidth = [this](const std::string& text) {
+        return GetTextExtent(toWx(text)).x;
+    };
+    m_memory =
+        new wxStaticText(this, wxID_ANY, toWx(std::ranges::max(memoryTexts, {}, memoryWidth)));
+    const std::array<std::string, 5> errors{
         std::string(kNotWholeNumbers),
         core::describe(core::ExtentError::TOO_SMALL, largest, m_budget),
         core::describe(core::ExtentError::TOO_LARGE, largest, m_budget),
-        core::describe(core::ExtentError::OVER_MEMORY_BUDGET, largest, m_budget)};
+        core::describe(core::ExtentError::OVER_MEMORY_BUDGET, largest, m_budget),
+        m_unboundedRefusal};
     const auto textWidth = [this](const std::string& text) { return GetTextExtent(toWx(text)).x; };
     m_error = new wxStaticText(this, wxID_ANY, toWx(std::ranges::max(errors, {}, textWidth)));
     useErrorColour(*m_error);
@@ -148,7 +168,12 @@ WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::E
 
     m_ok = buttons->GetAffirmativeButton();
 
+    auto* kinds = new wxBoxSizer(wxHORIZONTAL);
+    kinds->Add(m_fixed, wxSizerFlags().CentreVertical());
+    kinds->Add(m_unbounded, wxSizerFlags().CentreVertical().DoubleBorder(wxLEFT));
+
     auto* column = new wxBoxSizer(wxVERTICAL);
+    column->Add(kinds, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT | wxTOP));
     column->Add(fields, wxSizerFlags().Expand().DoubleBorder());
     column->Add(m_keepPattern, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT | wxBOTTOM));
     column->Add(m_memory, wxSizerFlags().DoubleBorder(wxLEFT | wxRIGHT));
@@ -165,22 +190,47 @@ WorldSizeDialog::WorldSizeDialog(wxWindow* parent, core::Extent current, core::E
     }
     m_presets->Bind(wxEVT_CHOICE,
                     [this](wxCommandEvent& event) { applyPreset(event.GetSelection()); });
+    for (wxRadioButton* choice : {m_fixed, m_unbounded})
+    {
+        choice->Bind(wxEVT_RADIOBUTTON, [this](wxCommandEvent&) { revalidate(); });
+    }
     revalidate();
 }
 
 bool WorldSizeDialog::Validate()
 {
+    if (unboundedChosen())
+    {
+        return wxDialog::Validate() && m_unboundedRefusal.empty();
+    }
     return wxDialog::Validate() && typedExtent().has_value();
+}
+
+bool WorldSizeDialog::unboundedChosen() const
+{
+    return m_unbounded->GetValue();
 }
 
 std::optional<WorldSizeRequest> WorldSizeDialog::request() const
 {
+    if (unboundedChosen())
+    {
+        if (!m_unboundedRefusal.empty())
+        {
+            return std::nullopt;
+        }
+        return WorldSizeRequest{.kind        = core::WorldKind::UNBOUNDED,
+                                .extent      = {},
+                                .keepPattern = m_keepPattern->GetValue()};
+    }
     const std::expected<core::Extent, std::string> extent = typedExtent();
     if (!extent)
     {
         return std::nullopt;
     }
-    return WorldSizeRequest{.extent = *extent, .keepPattern = m_keepPattern->GetValue()};
+    return WorldSizeRequest{.kind        = core::WorldKind::FIXED_SIZE,
+                            .extent      = *extent,
+                            .keepPattern = m_keepPattern->GetValue()};
 }
 
 std::expected<core::Extent, std::string> WorldSizeDialog::typedExtent() const
@@ -220,6 +270,20 @@ void WorldSizeDialog::applyPreset(int index)
 
 void WorldSizeDialog::revalidate()
 {
+    const bool unbounded = unboundedChosen();
+    for (wxWindow* sizeControl : std::initializer_list<wxWindow*>{m_width, m_height, m_presets})
+    {
+        sizeControl->Enable(!unbounded);
+    }
+    if (unbounded)
+    {
+        // A plane has no size: its memory grows with the pattern, up to the budget.
+        m_memory->SetLabelText(toWx(
+            std::format("Memory: grows with the pattern, up to {}", core::formatBytes(m_budget))));
+        m_error->SetLabelText(toWx(m_unboundedRefusal));
+        m_ok->Enable(m_unboundedRefusal.empty());
+        return;
+    }
     const std::expected<core::Extent, std::string> extent = typedExtent();
     // Only a valid size has a memory figure; the error line explains the others.
     const std::string bytes = extent ? core::formatBytes(core::worldBytes(*extent)) : "–";

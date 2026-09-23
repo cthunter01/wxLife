@@ -5,18 +5,24 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <memory>
+#include <new>
 #include <span>
+#include <stdexcept>
+#include <string>
 #include <utility>
 #include <vector>
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/BandedStepper.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/ParallelBands.h"
 #include "wxLife/core/Random.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Stepper.h"
 #include "wxLife/core/Types.h"
+#include "wxLife/core/WorldLimits.h"
 
 namespace wxLife::core
 {
@@ -60,6 +66,11 @@ World::World(Extent extent, Rule rule, Topology topology)
     m_ants.reserve(static_cast<std::size_t>(kMaxAnts));
 }
 
+WorldKind World::kind() const noexcept
+{
+    return m_plane ? WorldKind::UNBOUNDED : WorldKind::FIXED_SIZE;
+}
+
 Extent World::extent() const noexcept
 {
     return m_current.extent();
@@ -70,9 +81,29 @@ const Grid& World::cells() const noexcept
     return m_current;
 }
 
+const HashLife& World::plane() const noexcept
+{
+    assert(m_plane);
+    return *m_plane;
+}
+
 Cell World::at(CellPos p) const noexcept
 {
     return m_current.at(p);
+}
+
+Cell World::cellAt(UniversePos p) const noexcept
+{
+    if (m_plane)
+    {
+        return m_plane->at(p);
+    }
+    const Extent e = extent();
+    if (p.x < 0 || p.y < 0 || p.x >= e.width || p.y >= e.height)
+    {
+        return kDead;
+    }
+    return m_current.at({.x = static_cast<Coord>(p.x), .y = static_cast<Coord>(p.y)});
 }
 
 const Rule& World::rule() const noexcept
@@ -102,16 +133,29 @@ const Stepper& World::stepper() const noexcept
 
 std::uint64_t World::generation() const noexcept
 {
-    return m_generation;
+    return m_plane ? m_generation + m_plane->generation() : m_generation;
 }
 
 CellCount World::population() const noexcept
 {
-    return m_population;
+    return m_plane ? static_cast<CellCount>(m_plane->population()) : m_population;
 }
 
 void World::step()
 {
+    if (m_plane)
+    {
+        const std::expected<void, HashLifeError> stepped = m_plane->step(0);
+        if (!stepped && stepped.error() == HashLifeError::UNIVERSE_EDGE)
+        {
+            throw std::length_error(std::string(describe(stepped.error())));
+        }
+        if (!stepped)
+        {
+            throw std::bad_alloc();  // HashLife collects and retries before it gives up
+        }
+        return;
+    }
     switch (m_automaton)
     {
         case Automaton::LIFE:
@@ -131,9 +175,36 @@ void World::step()
     ++m_generation;
 }
 
-CellCount World::setCells(std::span<const CellPos> cells, Cell value, CellPos offset) noexcept
+std::expected<void, HashLifeError> World::stepPlane(unsigned                   exponent,
+                                                    const HashLifeStepOptions& options)
+{
+    assert(m_plane);
+    return m_plane->step(exponent, options);
+}
+
+void World::collectIfFull()
+{
+    if (m_plane)
+    {
+        m_plane->collectIfFull();
+    }
+}
+
+void World::collectGarbage()
+{
+    if (m_plane)
+    {
+        m_plane->collectGarbage();
+    }
+}
+
+CellCount World::setCells(std::span<const CellPos> cells, Cell value, CellPos offset)
 {
     assert(value == kDead || value == kAlive);
+    if (m_plane)
+    {
+        return m_plane->setCells(cells, value, {.x = offset.x, .y = offset.y});
+    }
     const Extent bounds  = extent();
     CellCount    changed = 0;
     for (const CellPos cell : cells)
@@ -156,13 +227,46 @@ CellCount World::setCells(std::span<const CellPos> cells, Cell value, CellPos of
     return changed;
 }
 
-bool World::setCell(CellPos p, Cell value) noexcept
+CellCount World::setCells(std::span<const UniversePos> cells, Cell value)
+{
+    assert(value == kDead || value == kAlive);
+    if (m_plane)
+    {
+        return m_plane->setCells(cells, value);
+    }
+    const Extent bounds  = extent();
+    CellCount    changed = 0;
+    for (const UniversePos cell : cells)
+    {
+        // Checked in 64 bits, so a far-away cell cannot wrap around into the grid.
+        if (cell.x < 0 || cell.y < 0 || cell.x >= bounds.width || cell.y >= bounds.height)
+        {
+            continue;
+        }
+        const CellPos p{.x = static_cast<Coord>(cell.x), .y = static_cast<Coord>(cell.y)};
+        if (m_current.at(p) != value)
+        {
+            m_current.set(p, value);
+            ++changed;
+        }
+    }
+    m_population += value == kAlive ? changed : -changed;
+    return changed;
+}
+
+bool World::setCell(CellPos p, Cell value)
 {
     return setCells({&p, 1}, value) == 1;
 }
 
-void World::clear() noexcept
+void World::clear()
 {
+    if (m_plane)
+    {
+        m_plane->clear();
+        m_generation = 0;
+        return;
+    }
     m_current.clear();  // m_next is overwritten by the next step anyway
     layOutAnts();       // generation 0 means the ants are back on their starting spots too
     m_generation = 0;
@@ -171,6 +275,7 @@ void World::clear() noexcept
 
 void World::randomize(double density, std::uint64_t seed)
 {
+    assert(!m_plane);
     // A cell is alive when a random byte (0..255) is below the threshold: 0 keeps every cell dead,
     // 256 makes every cell alive.
     const auto threshold =
@@ -187,11 +292,59 @@ void World::randomize(double density, std::uint64_t seed)
     m_generation = 0;
 }
 
+void World::randomize(double density, std::uint64_t seed, UniverseRect area)
+{
+    assert(m_plane);
+    assert(area.x1 - area.x0 <= kMaxWorldSide && area.y1 - area.y0 <= kMaxWorldSide);
+    const auto threshold =
+        static_cast<unsigned>(std::lround(std::clamp(density, 0.0, 1.0) * 256.0));
+    std::vector<Cell> row(static_cast<std::size_t>(std::max<UniverseCoord>(area.x1 - area.x0, 0)));
+    std::vector<UniversePos> alive;
+    for (UniverseCoord y = area.y0; y < area.y1; ++y)
+    {
+        randomizeRow(row, static_cast<Coord>(y - area.y0), seed, threshold);
+        for (std::size_t x = 0; x < row.size(); ++x)
+        {
+            if (row[x] == kAlive)
+            {
+                alive.push_back({.x = area.x0 + static_cast<UniverseCoord>(x), .y = y});
+            }
+        }
+    }
+    m_plane->clear();
+    m_plane->setCells(alive, kAlive);
+    m_generation = 0;
+}
+
 void World::resize(Extent newExtent, bool keepPattern)
 {
     // Allocate before changing anything: if either allocation throws, the world is untouched.
     Grid current(newExtent);
     Grid next(newExtent);
+    if (m_plane)
+    {
+        // From an unbounded plane: the cells around (0, 0) become the grid, that cell its centre.
+        const UniversePos corner{.x = -(newExtent.width / 2), .y = -(newExtent.height / 2)};
+        if (keepPattern)
+        {
+            m_plane->forEachBlock({.x0 = corner.x,
+                                   .y0 = corner.y,
+                                   .x1 = corner.x + newExtent.width,
+                                   .y1 = corner.y + newExtent.height},
+                                  0, [&](UniversePos cell) {
+                                      current.set({.x = static_cast<Coord>(cell.x - corner.x),
+                                                   .y = static_cast<Coord>(cell.y - corner.y)},
+                                                  kAlive);
+                                  });
+        }
+        m_generation = keepPattern ? generation() : 0;
+        m_current    = std::move(current);
+        m_next       = std::move(next);
+        m_population = m_current.countAlive();
+        m_plane.reset();
+        layOutAnts();  // the ants were nowhere while the world was unbounded
+        return;
+    }
 
     // Offset of the old grid inside the new one; negative when shrinking. Division truncates toward
     // zero, so growing and then shrinking back restores the original position.
@@ -238,9 +391,52 @@ void World::resize(Extent newExtent, bool keepPattern)
     }
 }
 
-void World::setRule(const Rule& rule) noexcept
+void World::makeUnbounded(bool keepPattern, std::uint64_t memoryBudgetBytes)
+{
+    assert(HashLife::supports(m_rule) && m_automaton == Automaton::LIFE);
+    if (m_plane)
+    {
+        if (!keepPattern)
+        {
+            clear();
+        }
+        return;
+    }
+    // Build everything first, so a failed allocation leaves the world as it was.
+    auto plane = std::make_unique<HashLife>(m_rule, memoryBudgetBytes);
+    if (keepPattern)
+    {
+        const Extent             e = extent();
+        std::vector<UniversePos> alive;
+        for (Coord y = 0; y < e.height; ++y)
+        {
+            const std::span<const Cell> row = m_current.row(y);
+            for (Coord x = 0; x < e.width; ++x)
+            {
+                if (row[static_cast<std::size_t>(x)] == kAlive)
+                {
+                    alive.push_back({.x = x - (e.width / 2), .y = y - (e.height / 2)});
+                }
+            }
+        }
+        plane->setCells(alive, kAlive);
+    }
+    Grid emptyCurrent;
+    Grid emptyNext;
+    m_generation = keepPattern ? m_generation : 0;
+    m_current    = std::move(emptyCurrent);
+    m_next       = std::move(emptyNext);
+    m_population = 0;
+    m_plane      = std::move(plane);
+}
+
+void World::setRule(const Rule& rule)
 {
     m_rule = rule;
+    if (m_plane)
+    {
+        m_plane->setRule(rule);
+    }
 }
 
 void World::setTopology(Topology topology) noexcept
@@ -250,6 +446,7 @@ void World::setTopology(Topology topology) noexcept
 
 void World::setAutomaton(Automaton automaton)
 {
+    assert(!m_plane || automaton == Automaton::LIFE);
     m_automaton = automaton;
     if (m_automaton == Automaton::LANGTON_ANT && m_ants.empty())
     {

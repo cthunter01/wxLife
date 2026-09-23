@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <iterator>
 #include <optional>
 #include <utility>
@@ -15,8 +14,21 @@ namespace wxLife::render
 
 void Viewport::setWorldExtent(core::Extent world) noexcept
 {
-    m_world = world;
+    m_world     = world;
+    m_unbounded = false;
     clampOffset();
+}
+
+void Viewport::setUnbounded() noexcept
+{
+    m_world     = {};
+    m_unbounded = true;
+    clampOffset();
+}
+
+bool Viewport::unbounded() const noexcept
+{
+    return m_unbounded;
 }
 
 void Viewport::setCanvasSize(PixelSize canvas) noexcept
@@ -117,32 +129,40 @@ void Viewport::zoomBy(int steps, PixelPoint anchor) noexcept
 
 void Viewport::fitWorld() noexcept
 {
-    fitCells({.x0 = 0, .y0 = 0, .x1 = m_world.width, .y1 = m_world.height});
+    if (!m_unbounded)
+    {
+        fitCells({.x0 = 0, .y0 = 0, .x1 = m_world.width, .y1 = m_world.height});
+    }
 }
 
-void Viewport::fitCells(core::CellRect cells) noexcept
+void Viewport::fitCells(core::UniverseRect cells) noexcept
 {
     // Cell size that fits along one axis; an empty axis does not limit it.
-    const auto fits = [](Pixel canvas, core::Coord side) {
+    const auto fits = [](Pixel canvas, core::UniverseCoord side) {
         return side > 0 ? canvas / side : Pixel{kMaxCellSize};
     };
     const Pixel size = std::min(fits(m_canvas.width, cells.x1 - cells.x0),
                                 fits(m_canvas.height, cells.y1 - cells.y0));
     m_cellSize       = static_cast<int>(std::clamp(size, Pixel{kMinCellSize}, Pixel{kMaxCellSize}));
 
-    // The centre of the cells under the centre of the canvas.
-    const auto axis = [this](core::Coord from, core::Coord to, Pixel canvas) {
-        return (((Pixel{from} + to) * m_cellSize) - canvas) / 2;
+    // The centre of the cells under the centre of the canvas. Cells beyond the reach are pulled
+    // in first, so no product overflows; clamping would stop the view there anyway.
+    const core::UniverseCoord reach = kUnboundedReach / m_cellSize;
+    const auto axis = [&](core::UniverseCoord from, core::UniverseCoord to, Pixel canvas) {
+        const core::UniverseCoord lo = std::clamp(from, -reach, reach);
+        const core::UniverseCoord hi = std::clamp(to, -reach, reach);
+        return (((Pixel{lo} + hi) * m_cellSize) - canvas) / 2;
     };
     m_offset = {.x = axis(cells.x0, cells.x1, m_canvas.width),
                 .y = axis(cells.y0, cells.y1, m_canvas.height)};
     clampOffset();
 }
 
-void Viewport::centerOn(core::CellPos cell) noexcept
+void Viewport::centerOn(core::UniversePos cell) noexcept
 {
-    const auto axis = [this](core::Coord c, Pixel canvas) {
-        return (Pixel{c} * m_cellSize) + (m_cellSize / 2) - (canvas / 2);
+    const core::UniverseCoord reach = kUnboundedReach / m_cellSize;
+    const auto                axis  = [&](core::UniverseCoord c, Pixel canvas) {
+        return (std::clamp(c, -reach, reach) * m_cellSize) + (m_cellSize / 2) - (canvas / 2);
     };
     m_offset = {.x = axis(cell.x, m_canvas.width), .y = axis(cell.y, m_canvas.height)};
     clampOffset();
@@ -160,35 +180,36 @@ void Viewport::scrollTo(PixelPoint offset) noexcept
     clampOffset();
 }
 
-std::optional<core::CellPos> Viewport::cellAt(PixelPoint canvasPoint) const noexcept
+std::optional<core::UniversePos> Viewport::cellAt(PixelPoint canvasPoint) const noexcept
 {
     // Floor division: content pixels left of or above a centred world are negative.
-    const std::int64_t x = core::floorDiv(m_offset.x + canvasPoint.x, m_cellSize);
-    const std::int64_t y = core::floorDiv(m_offset.y + canvasPoint.y, m_cellSize);
-    if (x < 0 || y < 0 || x >= m_world.width || y >= m_world.height)
+    const core::UniversePos cell{.x = core::floorDiv(m_offset.x + canvasPoint.x, m_cellSize),
+                                 .y = core::floorDiv(m_offset.y + canvasPoint.y, m_cellSize)};
+    if (!m_unbounded &&
+        (cell.x < 0 || cell.y < 0 || cell.x >= m_world.width || cell.y >= m_world.height))
     {
         return std::nullopt;
     }
-    return core::CellPos{.x = static_cast<core::Coord>(x), .y = static_cast<core::Coord>(y)};
+    return cell;
 }
 
-core::CellPos Viewport::cellAtClamped(PixelPoint canvasPoint) const noexcept
+core::UniversePos Viewport::cellAtClamped(PixelPoint canvasPoint) const noexcept
 {
     const auto axis = [this](Pixel content, core::Coord side) {
-        const std::int64_t cell = core::floorDiv(content, m_cellSize);
-        return static_cast<core::Coord>(std::clamp<std::int64_t>(cell, 0, std::max(side - 1, 0)));
+        const core::UniverseCoord cell = core::floorDiv(content, m_cellSize);
+        return m_unbounded ? cell : std::clamp<core::UniverseCoord>(cell, 0, std::max(side - 1, 0));
     };
     return {.x = axis(m_offset.x + canvasPoint.x, m_world.width),
             .y = axis(m_offset.y + canvasPoint.y, m_world.height)};
 }
 
-PixelPoint Viewport::cellOrigin(core::CellPos cell) const noexcept
+PixelPoint Viewport::cellOrigin(core::UniversePos cell) const noexcept
 {
     return {.x = (Pixel{cell.x} * m_cellSize) - m_offset.x,
             .y = (Pixel{cell.y} * m_cellSize) - m_offset.y};
 }
 
-core::CellRect Viewport::visibleCells() const noexcept
+core::UniverseRect Viewport::visibleCells() const noexcept
 {
     if (m_canvas.width == 0 || m_canvas.height == 0)
     {
@@ -196,8 +217,8 @@ core::CellRect Viewport::visibleCells() const noexcept
     }
     // Cells [first, end) along one axis whose pixels overlap [0, canvas).
     const auto axis = [this](Pixel offset, Pixel canvas, core::Coord side) {
-        const auto clip = [side](std::int64_t cell) {
-            return static_cast<core::Coord>(std::clamp<std::int64_t>(cell, 0, side));
+        const auto clip = [this, side](core::UniverseCoord cell) {
+            return m_unbounded ? cell : std::clamp<core::UniverseCoord>(cell, 0, side);
         };
         return std::pair{clip(core::floorDiv(offset, m_cellSize)),
                          clip(core::floorDiv(offset + canvas - 1, m_cellSize) + 1)};
@@ -209,6 +230,13 @@ core::CellRect Viewport::visibleCells() const noexcept
 
 void Viewport::clampOffset() noexcept
 {
+    if (m_unbounded)
+    {
+        m_offset = {
+            .x = std::clamp(m_offset.x, -kUnboundedReach, kUnboundedReach - m_canvas.width),
+            .y = std::clamp(m_offset.y, -kUnboundedReach, kUnboundedReach - m_canvas.height)};
+        return;
+    }
     const auto axis = [](Pixel offset, Pixel content, Pixel canvas) {
         if (content <= canvas)
         {

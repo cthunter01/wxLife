@@ -17,7 +17,9 @@
 #include "support/AsciiGrid.h"
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Grid.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/Random.h"
+#include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
@@ -664,6 +666,56 @@ TEST(RasterizerTest, RandomScenesMatchThePixelReference)
         drawAnts(scene.ants, scene.viewport, scene.style, frame);
         ASSERT_EQ(firstDifference(frame, scene.grid, scene.viewport, scene.style, scene.ants), "")
             << "scene " << i << ": " << scene.description;
+    }
+}
+
+TEST(RasterizerTest, APlaneLooksLikeAGridWithTheSameCells)
+{
+    // A plane draws its visible cells through a small grid of their own. With the grid's cell
+    // (100, 100) at the plane's (0, 0), both must give the same pixels, grid lines included,
+    // wherever the view is, at every cell size.
+    core::SplitMix64               rng(99);
+    Grid                           grid({.width = 200, .height = 200});
+    core::HashLife                 plane(core::Rule{}, std::uint64_t{1} << 26);
+    std::vector<core::UniversePos> cells;
+    for (Coord y = 0; y < 200; ++y)
+    {
+        for (Coord x = 0; x < 200; ++x)
+        {
+            if (rng() % 3 == 0)
+            {
+                grid.set({.x = x, .y = y}, core::kAlive);
+                cells.push_back({.x = x - 100, .y = y - 100});
+            }
+        }
+    }
+    plane.setCells(cells, core::kAlive);
+    const RenderStyle style = darkStyle();
+    for (const int size : {1, 2, 3, 5, 7, 10, 16})
+    {
+        for (int trial = 0; trial < 5; ++trial)
+        {
+            const PixelSize  canvas{.width = 90, .height = 70};
+            const PixelPoint offset{
+                .x = static_cast<Pixel>(rng() % static_cast<std::uint64_t>((200 * size) - 90)),
+                .y = static_cast<Pixel>(rng() % static_cast<std::uint64_t>((200 * size) - 70))};
+            const Viewport fixed = viewportFor(grid, canvas, size, offset);
+            Viewport       unbounded;
+            unbounded.setUnbounded();
+            unbounded.setCanvasSize(canvas);
+            unbounded.setCellSize(size, {});
+            unbounded.scrollTo(
+                {.x = offset.x - (Pixel{100} * size), .y = offset.y - (Pixel{100} * size)});
+            ASSERT_EQ(fixed.offset().x, offset.x);  // inside the grid, so nothing was clamped
+
+            PixelBuffer fromPlane;
+            Rasterizer  rasterizer;
+            rasterizer.render(plane, unbounded, style, fromPlane);
+            const PixelBuffer fromGrid = render(grid, fixed, style);
+            ASSERT_EQ(fromPlane.size(), fromGrid.size());
+            EXPECT_TRUE(std::ranges::equal(fromPlane.bytes(), fromGrid.bytes()))
+                << "cell size " << size << ", offset " << offset.x << ", " << offset.y;
+        }
     }
 }
 

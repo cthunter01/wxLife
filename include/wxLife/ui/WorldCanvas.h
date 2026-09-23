@@ -30,13 +30,13 @@ public:
     struct Callbacks
     {
         /// Apply a stroke segment.
-        std::function<void(std::span<const core::CellPos>, core::Cell)> paintCells;
+        std::function<void(std::span<const core::UniversePos>, core::Cell)> paintCells;
         /// Ctrl + left click on a cell.
-        std::function<void(core::CellPos)> toggleAnt;
+        std::function<void(core::UniversePos)> toggleAnt;
         /// Zoom, scroll or resize.
         std::function<void()> viewChanged;
         /// nullopt = the pointer is not over the world.
-        std::function<void(std::optional<core::CellPos>)> hoverChanged;
+        std::function<void(std::optional<core::UniversePos>)> hoverChanged;
     };
 
     /// `world` is owned by LifeApp and outlives this window.
@@ -49,17 +49,21 @@ public:
     /// Along render::kZoomSteps, anchored at the canvas centre.
     void zoomBy(int steps);
     /// Fits the world into the canvas and keeps it fitted through canvas size changes until the
-    /// user zooms or scrolls.
+    /// user zooms or scrolls. An unbounded world fits its pattern as it is now; an empty one is
+    /// centred on (0, 0).
     void fitWorld();
     /// Like fitWorld(), for part of the world: fits and centres `cells`, and keeps them fitted.
-    void               showCells(core::CellRect cells);
+    void showCells(core::UniverseRect cells);
+    /// Centres the world, or an unbounded world's pattern, without zooming.
     void               centerWorld();
     [[nodiscard]] bool showGrid() const noexcept;
     void               setShowGrid(bool show);
     /// Colours and grid-line policy.
     [[nodiscard]] const render::RenderStyle& style() const noexcept;
-    /// Call right after World::resize(): fits and centres the world.
+    /// Call right after World::resize() or World::makeUnbounded(): fits and centres the world.
     void worldExtentChanged();
+    /// The cells the canvas shows.
+    [[nodiscard]] core::UniverseRect visibleCells() const noexcept;
     /// World size that fills the canvas at the current cell size.
     [[nodiscard]] core::Extent cellsThatFit() const noexcept;
     /// Ends any drag and releases the mouse capture.
@@ -83,10 +87,10 @@ private:
     void onCaptureLost(wxMouseCaptureLostEvent& event);
     void onThemeChanged(wxSysColourChangedEvent& event);
 
-    void beginPaint(core::CellPos cell, core::Cell value);
+    void beginPaint(core::UniversePos cell, core::Cell value);
     void continuePaint(render::PixelPoint devicePoint);
     void endDrag();
-    void setHovered(std::optional<core::CellPos> cell);
+    void setHovered(std::optional<core::UniversePos> cell);
     /// Scrollbars, hovered cell, Refresh(false), m_callbacks.viewChanged.
     void viewportChanged();
     /// viewportChanged() after a zoom or scroll by the user; ends a kept fit.
@@ -110,17 +114,17 @@ private:
     int        m_dragButton  = wxMOUSE_BTN_NONE;  ///< Only this button's release ends the drag.
     core::Cell m_strokeValue = core::kAlive;
     /// nullopt: the next motion starts a new segment.
-    std::optional<core::CellPos> m_lastStrokeCell;
+    std::optional<core::UniversePos> m_lastStrokeCell;
     /// Reused buffer for one stroke segment.
-    std::vector<core::CellPos> m_strokeCells;
-    render::PixelPoint         m_lastPanPoint;
+    std::vector<core::UniversePos> m_strokeCells;
+    render::PixelPoint             m_lastPanPoint;
     /// Device pixels; nullopt while the pointer is elsewhere.
     std::optional<render::PixelPoint> m_pointer;
-    std::optional<core::CellPos>      m_hovered;
+    std::optional<core::UniversePos>  m_hovered;
 
     /// The cells kept fitted through canvas size changes. Set by fitWorld() and showCells(),
     /// cleared by cameraMoved().
-    std::optional<core::CellRect> m_keptFit;
+    std::optional<core::UniverseRect> m_keptFit;
     double m_wheelZoomNotches = 0.0;  ///< Leftover fractions from smooth-scrolling devices.
     double m_wheelPanX        = 0.0;
     double m_wheelPanY        = 0.0;

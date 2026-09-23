@@ -61,6 +61,28 @@ inline constexpr std::array kAutomata{Automaton::LIFE, Automaton::LANGTON_ANT};
     std::unreachable();
 }
 
+/// What a world is. The core branches on it only in switches without `default`.
+enum class WorldKind : std::uint8_t
+{
+    FIXED_SIZE,  ///< A grid of so many cells, with dead or wrapping edges.
+    UNBOUNDED,   ///< An unbounded plane, run by HashLife.
+};
+
+/// Every WorldKind, so tests cover a new one automatically.
+inline constexpr std::array kWorldKinds{WorldKind::FIXED_SIZE, WorldKind::UNBOUNDED};
+
+[[nodiscard]] constexpr std::string_view toString(WorldKind k) noexcept
+{
+    switch (k)
+    {
+        case WorldKind::FIXED_SIZE:
+            return "fixed size";
+        case WorldKind::UNBOUNDED:
+            return "unbounded";
+    }
+    std::unreachable();
+}
+
 /// Cell position; (0, 0) is the top-left cell.
 struct CellPos
 {
@@ -96,6 +118,29 @@ struct CellRect
     [[nodiscard]] constexpr bool empty() const noexcept { return x0 >= x1 || y0 >= y1; }
 
     friend constexpr bool operator==(CellRect, CellRect) noexcept = default;
+};
+
+/// A 64-bit cell coordinate: on an unbounded plane (0, 0) is its centre, in a fixed-size world the
+/// top-left cell.
+using UniverseCoord = std::int64_t;
+
+/// A cell position with 64-bit coordinates, for any kind of world.
+struct UniversePos
+{
+    UniverseCoord x = 0;
+    UniverseCoord y = 0;
+
+    friend constexpr bool operator==(UniversePos, UniversePos) noexcept = default;
+};
+
+/// Half-open cell rectangle [x0, x1) × [y0, y1) with 64-bit coordinates.
+struct UniverseRect
+{
+    UniverseCoord x0 = 0, y0 = 0, x1 = 0, y1 = 0;
+
+    [[nodiscard]] constexpr bool empty() const noexcept { return x0 >= x1 || y0 >= y1; }
+
+    friend constexpr bool operator==(UniverseRect, UniverseRect) noexcept = default;
 };
 
 /// Division rounding toward negative infinity. @pre b > 0

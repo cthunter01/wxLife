@@ -32,22 +32,32 @@ inline constexpr std::array kZoomSteps{1,  2,  3,  4,  5,  6,  8,  10, 12,
 }
 
 /// The camera: maps canvas device pixels to world cells and back.
-/// offset() is the content pixel shown at the canvas's top-left corner. Every change clamps it: on
-/// an axis where the world is smaller than the canvas the world is centred (a negative offset),
-/// otherwise the view stays inside the world.
+/// offset() is the content pixel shown at the canvas's top-left corner; content pixel p lies in
+/// cell floor(p / cellSize). Every change clamps it: in a fixed-size world, on an axis where the
+/// world is smaller than the canvas the world is centred (a negative offset), otherwise the view
+/// stays inside the world. An unbounded world has no edges; its view stays within kUnboundedReach.
 class Viewport
 {
 public:
+    /// How far the view of an unbounded world may go from its centre, in content pixels. It keeps
+    /// every product in the zoom arithmetic within 64 bits; at 1 px per cell it is 3.6e16 cells.
+    static constexpr Pixel kUnboundedReach = Pixel{1} << 55;
+
+    /// A fixed-size world, (0, 0) its top-left cell.
     void setWorldExtent(core::Extent world) noexcept;
+    /// An unbounded world, with no edges.
+    void setUnbounded() noexcept;
     /// Negative sides count as 0.
     void setCanvasSize(PixelSize canvas) noexcept;
 
+    [[nodiscard]] bool unbounded() const noexcept;
+    /// {} when unbounded.
     [[nodiscard]] core::Extent worldExtent() const noexcept;
     [[nodiscard]] PixelSize    canvasSize() const noexcept;
     /// Device pixels per cell side.
     [[nodiscard]] int        cellSize() const noexcept;
     [[nodiscard]] PixelPoint offset() const noexcept;
-    /// world × cellSize
+    /// world × cellSize; {} when unbounded.
     [[nodiscard]] PixelSize contentSize() const noexcept;
 
     /// Changes the cell size. The world point under the centre of the `anchor` pixel stays inside
@@ -60,24 +70,26 @@ public:
     /// Moves to the `steps`-th kZoomSteps entry above (steps > 0) or below (steps < 0) the current
     /// size, clamped to the table, anchored like setCellSize().
     void zoomBy(int steps, PixelPoint anchor) noexcept;
-    /// Largest size (≥ 1) that shows the whole world; centres it.
+    /// Largest size (≥ 1) that shows the whole world; centres it. An unbounded world has no whole,
+    /// so the view keeps its place.
     void fitWorld() noexcept;
     /// Largest size (≥ 1) that shows every cell of `cells`, and centres them as far as the clamping
     /// allows. An empty side does not limit the size.
-    void fitCells(core::CellRect cells) noexcept;
-    void centerOn(core::CellPos cell) noexcept;
+    void fitCells(core::UniverseRect cells) noexcept;
+    void centerOn(core::UniversePos cell) noexcept;
     /// Positive values move the view right/down.
     void panBy(Pixel dx, Pixel dy) noexcept;
     void scrollTo(PixelPoint offset) noexcept;
 
-    /// @return nullopt when the point is outside the world.
-    [[nodiscard]] std::optional<core::CellPos> cellAt(PixelPoint canvasPoint) const noexcept;
+    /// @return nullopt when the point is outside the world; never for an unbounded one.
+    [[nodiscard]] std::optional<core::UniversePos> cellAt(PixelPoint canvasPoint) const noexcept;
     /// Like cellAt(), but clamped to the world; for drags that leave it.
-    [[nodiscard]] core::CellPos cellAtClamped(PixelPoint canvasPoint) const noexcept;
-    /// Canvas pixel of the cell's top-left corner.
-    [[nodiscard]] PixelPoint cellOrigin(core::CellPos cell) const noexcept;
-    /// Clipped to the world. An empty result is not always CellRect{}; test it with empty().
-    [[nodiscard]] core::CellRect visibleCells() const noexcept;
+    [[nodiscard]] core::UniversePos cellAtClamped(PixelPoint canvasPoint) const noexcept;
+    /// Canvas pixel of the cell's top-left corner. @pre the cell is within kUnboundedReach pixels
+    [[nodiscard]] PixelPoint cellOrigin(core::UniversePos cell) const noexcept;
+    /// Clipped to a fixed-size world. An empty result is not always UniverseRect{}; test it with
+    /// empty().
+    [[nodiscard]] core::UniverseRect visibleCells() const noexcept;
 
 private:
     /// One axis of a run of zooms. The point it keeps under its anchor is the centre of content
@@ -100,6 +112,7 @@ private:
     void clampOffset() noexcept;
 
     core::Extent                          m_world{};
+    bool                                  m_unbounded = false;
     PixelSize                             m_canvas{};
     int                                   m_cellSize = 4;
     PixelPoint                            m_offset{};
