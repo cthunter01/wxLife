@@ -5,7 +5,6 @@
 #include <cassert>
 #include <cstddef>
 #include <cstdint>
-#include <functional>
 #include <span>
 #include <vector>
 
@@ -218,6 +217,12 @@ void drawScanline(Bytes scan, std::span<const core::Cell> cellRow, core::Univers
     }
 }
 
+// a | b for cells, without the int that `|` makes of bytes (MSVC warns when it goes back into one).
+core::Cell cellOr(core::Cell a, core::Cell b) noexcept
+{
+    return static_cast<core::Cell>(a | b);
+}
+
 // Makes each block of `blocks` in `window` alive if any of its cells in `grid` is. The block rows
 // are split into bands on several threads; `scratch` gets one row per band, in which the cell rows
 // of a block row are ORed together before each block's run of it is.
@@ -251,7 +256,7 @@ void shrinkGrid(const core::Grid& grid, unsigned shrink, core::UniverseRect bloc
             {
                 std::ranges::transform(any,
                                        grid.row(static_cast<core::Coord>(y)).subspan(first, width),
-                                       any.begin(), std::bit_or<>{});
+                                       any.begin(), cellOr);
             }
             // Cells are 0 or 1, so ORing a block's run tells whether any is alive.
             const std::span<core::Cell> out = window.row(row);
@@ -262,7 +267,7 @@ void shrinkGrid(const core::Grid& grid, unsigned shrink, core::UniverseRect bloc
                 core::Cell        alive = core::kDead;
                 for (const core::Cell cell : any.subspan(from, to - from))
                 {
-                    alive |= cell;
+                    alive = cellOr(alive, cell);
                 }
                 out[block] = alive;
             }
