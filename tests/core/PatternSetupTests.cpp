@@ -9,6 +9,7 @@
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Demo.h"
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Pattern.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
@@ -53,7 +54,8 @@ TEST(PatternSetupTest, ADemoBringsItsOwnWorld)
     EXPECT_EQ(setup.ants, (std::vector<Ant>(kAnts.begin(), kAnts.end())));
     EXPECT_EQ(setup.speed, (Speed{.gensPerSecond = 7}));
     ASSERT_TRUE(setup.view.has_value());
-    EXPECT_EQ(setup.view.value(), (CellRect{.x0 = 20, .y0 = 12, .x1 = 40, .y1 = 27}));
+    EXPECT_EQ(setup.view.value(), (UniverseRect{.x0 = 20, .y0 = 12, .x1 = 40, .y1 = 27}));
+    EXPECT_FALSE(setup.stepExponent.has_value());
 
     // An origin places the pattern there, and a rule in the file wins over Conway's Life.
     Demo placed              = demo;
@@ -141,6 +143,48 @@ TEST(PatternSetupTest, AFileOnAPlaneIsCentredOnTheOrigin)
     EXPECT_EQ(setup->rule.toString(), "B36/S23");
     EXPECT_FALSE(setup->view.has_value());
     EXPECT_FALSE(setup->speed.has_value());
+}
+
+TEST(PatternSetupTest, ADemoOnAPlaneCentresItsCellsOnTheOrigin)
+{
+    const Demo demo{
+        .name         = "Test",
+        .about        = "A test.",
+        .kind         = WorldKind::UNBOUNDED,
+        .speed        = {.gensPerSecond = 7},
+        .stepExponent = 9,
+        .view         = CellRect{.x0 = -5, .y0 = -5, .x1 = 15, .y1 = 10},
+    };
+    const PatternSetup setup = demoSetup(demo, blank({.width = 10, .height = 5}));
+    EXPECT_EQ(setup.kind, WorldKind::UNBOUNDED);
+    EXPECT_EQ(setup.world, (Extent{}));
+    EXPECT_EQ(setup.origin, (CellPos{-5, -2}));
+    EXPECT_EQ(setup.stepExponent, 9U);
+    EXPECT_EQ(setup.view.value(), (UniverseRect{.x0 = -10, .y0 = -7, .x1 = 10, .y1 = 8}));
+
+    // A macrocell stays where its file puts it, and the view is relative to its bounding box.
+    Pattern tree;
+    tree.tree              = Macrocell{.nodes      = {},
+                                       .population = 1,
+                                       .bounds     = {.x0 = -1000, .y0 = 70, .x1 = -900, .y1 = 71},
+                                       .generation = 0};
+    const PatternSetup far = demoSetup(demo, tree);
+    EXPECT_EQ(far.view.value(), (UniverseRect{.x0 = -1005, .y0 = 65, .x1 = -985, .y1 = 80}));
+}
+
+TEST(PatternSetupTest, AMacrocellFileAlwaysGetsAPlane)
+{
+    Pattern tree;
+    tree.tree = Macrocell{};
+    tree.rule = Rule::parse("B36/S23").value();
+    const auto setup =
+        fileSetup(tree, Rule{}, WorldKind::FIXED_SIZE, Topology::TORUS, kLargeBudget);
+    ASSERT_TRUE(setup.has_value());
+    EXPECT_EQ(setup->kind, WorldKind::UNBOUNDED);
+    EXPECT_EQ(setup->rule.toString(), "B36/S23");
+    EXPECT_FALSE(setup->view.has_value());
+    EXPECT_FALSE(setup->speed.has_value());
+    EXPECT_FALSE(setup->stepExponent.has_value());
 }
 
 }  // namespace

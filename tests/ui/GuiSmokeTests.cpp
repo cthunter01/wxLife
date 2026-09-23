@@ -60,6 +60,7 @@
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Demo.h"
+#include "wxLife/core/EmbeddedFile.h"
 #include "wxLife/core/Format.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
@@ -1463,22 +1464,41 @@ TEST_F(GuiSmokeTest, LoadsDemoPatterns)
     }
     EXPECT_EQ(m_world.population(), 41);  // one glider more
 
-    // The Primer runs at Max and opens on its machine, not on the whole world.
+    // The Primer runs on an unbounded plane at Max, in steps of 2^5, and opens on its machine.
     answers.demo = "Primer";
     command(ID_DEMO_PATTERNS);
     EXPECT_EQ(answers.demoOpenedOn, "Gosper glider gun");  // the dialog remembers the last demo
-    EXPECT_EQ(m_world.extent(), (core::Extent{3840, 3694}));
+    EXPECT_EQ(m_world.kind(), core::WorldKind::UNBOUNDED);
     EXPECT_TRUE(menuItem(ID_TOGGLE_MAX_SPEED).IsChecked());
-    EXPECT_EQ(status(StatusField::SPEED), "Max");
-    // The panel's world size text is longer now, so the canvas may be narrower once GTK has laid
+    EXPECT_EQ(status(StatusField::SPEED), "Max · step 2^5");
+    // The panel's world text is different now, so the canvas may be narrower once GTK has laid
     // the window out again; the view follows at the next paint.
     repaint();
     const std::optional<core::CellPos> middle = pointAt(canvasCentre());
     ASSERT_TRUE(middle.has_value());
-    // The middle of the view: the Primer is at (400, 3000), and its view spans x -300..480 and
-    // y -40..334 from there.
-    EXPECT_LE(std::abs(middle.value().x - 490), 1);
-    EXPECT_LE(std::abs(middle.value().y - 3147), 1);
+    // The middle of the view: the Primer is centred on (0, 0), and its view spans x -300..480
+    // and y -40..334 from its top-left corner.
+    const core::Extent primer =
+        core::demoPattern(*std::ranges::find(core::demos(), "Primer", &core::Demo::name)).extent;
+    EXPECT_LE(std::abs(middle.value().x - (-(primer.width / 2) + 90)), 1);
+    EXPECT_LE(std::abs(middle.value().y - (-(primer.height / 2) + 147)), 1);
+
+    // A giant from a macrocell file: Kok's galaxy made of OTCA metapixels, shown whole.
+    answers.demo = "Kok's galaxy in OTCA metapixels";
+    command(ID_DEMO_PATTERNS);
+    EXPECT_TRUE(std::ranges::contains(answers.demoTexts,
+                                      "Pattern: 30,720 × 30,720 cells, 7,408,195 alive World: "
+                                      "unbounded · B3/S23 · Max · steps of 2^11"));
+    EXPECT_EQ(m_world.kind(), core::WorldKind::UNBOUNDED);
+    EXPECT_EQ(m_world.population(), 7'408'195);
+    EXPECT_EQ(m_world.generation(), 0U);
+    EXPECT_EQ(status(StatusField::SPEED), "Max · step 2^11");
+    repaint();
+    const core::UniverseRect shown = m_canvas->visibleCells();
+    const core::UniverseRect all   = m_world.plane().bounds().value();
+    EXPECT_TRUE(shown.x0 <= all.x0 && shown.y0 <= all.y0 && shown.x1 >= all.x1 &&
+                shown.y1 >= all.y1);
+    EXPECT_TRUE(m_canvas->scale().zoomedOut());
 
     // An ant demo switches the automaton and places its ants on an empty world.
     answers.demo = "Four ants in a square";
@@ -1547,8 +1567,8 @@ TEST_F(GuiSmokeTest, OpensPatternFiles)
     EXPECT_FALSE(m_frame->openPatternFile(toWx((folder / "wxLife_test_missing.rle").string())));
     EXPECT_EQ(answers.messages,
               (std::vector<std::string>{
-                  "Cannot open wxLife_test_bad.rle.\n\nThis is neither an RLE (.rle) nor a "
-                  "plaintext (.cells) pattern.",
+                  "Cannot open wxLife_test_bad.rle.\n\nThis is not an RLE (.rle), plaintext "
+                  "(.cells) or macrocell (.mc) pattern.",
                   "Cannot open wxLife_test_huge.rle.\n\nLine 1: The pattern is 4,195 × 330,721 "
                   "cells; a world has at most 100,000 cells per side.",
                   "Cannot open wxLife_test_missing.rle.\n\nThe file cannot be read.",
@@ -1556,7 +1576,35 @@ TEST_F(GuiSmokeTest, OpensPatternFiles)
     EXPECT_EQ(m_world.extent(), (core::Extent{103, 103}));
     EXPECT_EQ(m_world.population(), 5);
 
-    for (const std::filesystem::path& path : {glider, noPattern, huge})
+    // A macrocell file needs an unbounded world, so it gets one, with the cells where the file
+    // puts them and the generation it gives.
+    answers.messages.clear();
+    const std::filesystem::path tree =
+        write("wxLife_test_glider.mc",
+              "[M2] (golly 4.2)\n#R B36/S23\n#G 9\n$..*$...*$.***$\n4 1 0 0 0\n");
+    EXPECT_TRUE(m_frame->openPatternFile(toWx(tree.string())));
+    EXPECT_EQ(m_world.kind(), core::WorldKind::UNBOUNDED);
+    EXPECT_EQ(m_world.population(), 5);
+    EXPECT_EQ(m_world.cellAt({.x = -6, .y = -7}), core::kAlive);
+    EXPECT_EQ(m_world.generation(), 9U);
+    EXPECT_EQ(status(StatusField::WORLD), "Unbounded · B36/S23 · HashLife");
+    repaint();
+
+    // Golly's compressed files are unpacked first; a damaged one says so.
+    const std::string_view galaxy = core::embeddedPatternText("metapixel-galaxy.mc.gz").value();
+    const std::filesystem::path packed = write("wxLife_test_galaxy.mc.gz", galaxy);
+    const std::filesystem::path cut    = write("wxLife_test_cut.mc.gz", galaxy.substr(0, 1000));
+    EXPECT_TRUE(m_frame->openPatternFile(toWx(packed.string())));
+    EXPECT_EQ(m_world.population(), 7'408'195);
+    EXPECT_EQ(status(StatusField::WORLD), "Unbounded · B3/S23 · HashLife");
+    EXPECT_FALSE(m_frame->openPatternFile(toWx(cut.string())));
+    EXPECT_EQ(answers.messages,
+              (std::vector<std::string>{"Cannot open wxLife_test_cut.mc.gz.\n\nThe file cannot be "
+                                        "unpacked. The data ends too early."}));
+    EXPECT_EQ(m_world.population(), 7'408'195);
+    repaint();
+
+    for (const std::filesystem::path& path : {glider, noPattern, huge, tree, packed, cut})
     {
         std::filesystem::remove(path);
     }

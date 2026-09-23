@@ -7,7 +7,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <format>
 #include <limits>
+#include <new>
 #include <optional>
 #include <set>
 #include <string>
@@ -18,7 +20,9 @@
 
 #include <gtest/gtest.h>
 
+#include "support/RandomTree.h"
 #include "wxLife/core/EmbeddedFile.h"
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Pattern.h"
 #include "wxLife/core/Random.h"
 #include "wxLife/core/Rule.h"
@@ -527,6 +531,67 @@ TEST(HashLifeTest, AChangedRuleAppliesFromTheNextStep)
         ASSERT_TRUE(life.step(0).has_value());
     }
     EXPECT_EQ(cellsOf(life), cellsOf(dense, centre));
+}
+
+TEST(HashLifeTest, LoadsAMacrocellTree)
+{
+    // A glider in the north-west quarter of a 16 × 16 root centred on (0, 0), at generation 7.
+    const Pattern pattern = readPattern("[M2]\n#G 7\n$..*$...*$.***$\n4 1 0 0 0\n").value();
+    HashLife      loaded(Rule{}, kBudget);
+    loaded.load(pattern.tree.value());
+    const CellSet glider{{-6, -7}, {-5, -6}, {-7, -5}, {-6, -5}, {-5, -5}};
+    EXPECT_EQ(cellsOf(loaded), glider);
+    EXPECT_EQ(loaded.generation(), 7U);
+    EXPECT_EQ(loaded.population(), 5U);
+    EXPECT_EQ(loaded.bounds(), pattern.tree.value().bounds);
+
+    // It runs as the same cells set one by one do.
+    HashLife                 set(Rule{}, kBudget);
+    std::vector<UniversePos> cells;
+    for (const auto& [x, y] : glider)
+    {
+        cells.push_back({.x = x, .y = y});
+    }
+    set.setCells(cells, kAlive);
+    ASSERT_TRUE(loaded.step(6).has_value());
+    ASSERT_TRUE(set.step(6).has_value());
+    EXPECT_EQ(cellsOf(loaded), cellsOf(set));
+    EXPECT_EQ(loaded.generation(), 7U + 64U);
+
+    // Loading again replaces everything, and an empty tree leaves an empty plane.
+    loaded.load(Macrocell{.nodes = {}, .population = 0, .bounds = {}, .generation = 3});
+    EXPECT_EQ(loaded.population(), 0U);
+    EXPECT_EQ(loaded.generation(), 3U);
+}
+
+TEST(HashLifeTest, ALoadedTreeStaysShared)
+{
+    // One cell, repeated four times at every level up to 33: 2^60 live cells in 31 nodes.
+    std::string text = "[M2]\n*$\n";
+    for (int level = 4; level <= 33; ++level)
+    {
+        const int previous = level - 3;
+        text += std::format("{} {} {} {} {}\n", level, previous, previous, previous, previous);
+    }
+    const Pattern     pattern = readPattern(text).value();
+    HashLife          plane(Rule{}, kBudget);
+    const std::size_t before = plane.nodeCount();
+    plane.load(pattern.tree.value());
+    EXPECT_LT(plane.nodeCount() - before, 100U);
+    EXPECT_EQ(plane.population(), pattern.tree.value().population);
+    EXPECT_EQ(plane.population(), std::uint64_t{1} << 60);
+    EXPECT_EQ(plane.bounds(), pattern.tree.value().bounds);
+}
+
+TEST(HashLifeTest, ATreeTooLargeForTheBudgetLeavesAnEmptyPlane)
+{
+    // Twenty thousand random leaves need more nodes than the smallest budget's one chunk.
+    HashLife plane(Rule{}, 1);
+    EXPECT_THROW(plane.load(test::randomTree(20'000, 5)), std::bad_alloc);
+    EXPECT_EQ(plane.population(), 0U);
+    // And the plane still works.
+    plane.load(readPattern("[M2]\n*$\n4 0 0 0 1\n").value().tree.value());
+    EXPECT_EQ(cellsOf(plane), (CellSet{{0, 0}}));
 }
 
 }  // namespace

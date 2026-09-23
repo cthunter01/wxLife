@@ -2,8 +2,10 @@
 #   cmake -DOUTPUT=<file.cpp> -DFILES=<a.rle|b.rle|...> -P EmbedPatterns.cmake
 # Writes a C++ source that defines embeddedPatternFiles() (wxLife/core/EmbeddedFile.h): every file as a char
 # array, so the program needs no data files next to it on any platform. Arrays, not string literals, because
-# MSVC limits a string literal to 64 KiB. The files must be ASCII, which keeps every byte a valid char
-# constant. FILES is separated by '|', since a ';' would split the argument on the command line.
+# MSVC limits a string literal to 64 KiB. Pattern files must be ASCII; gzip files (.gz) may hold any byte, and
+# their bytes from 0x80 up are written as character literals ('\x8b'), which fit a char whether it is signed or
+# not, where 0x8b would not. FILES is separated by '|', since a ';' would split the argument on the command
+# line.
 if(NOT DEFINED OUTPUT OR NOT DEFINED FILES)
     message(FATAL_ERROR "EmbedPatterns.cmake requires -DOUTPUT=... and -DFILES=...")
 endif()
@@ -23,11 +25,13 @@ foreach(file IN LISTS files)
     endif()
     # Pairs are matched from the start, so each "0x.." is one byte.
     string(REGEX REPLACE "([0-9a-f][0-9a-f])" "0x\\1," bytes "${hex}")
-    if(bytes MATCHES "0x[89a-f]")
-        message(FATAL_ERROR "${file} is not ASCII")
-    endif()
     # Sixteen bytes per line (CMake's regular expressions have no {n}).
     string(REGEX REPLACE "(${line})" "\\1\n    " bytes "${bytes}")
+    if(name MATCHES "\\.gz$")
+        string(REGEX REPLACE "0x([89a-f][0-9a-f])" "'\\\\x\\1'" bytes "${bytes}")
+    elseif(bytes MATCHES "0x[89a-f]")
+        message(FATAL_ERROR "${file} is not ASCII")
+    endif()
     string(APPEND arrays "// ${name}\nconstexpr std::array<char, ${size}> kFile${index}{\n    ${bytes}};\n\n")
     set(array "kFile${index}")
     string(APPEND entries

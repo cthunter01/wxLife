@@ -17,6 +17,7 @@
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/BandedStepper.h"
 #include "wxLife/core/HashLife.h"
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/ParallelBands.h"
 #include "wxLife/core/Random.h"
 #include "wxLife/core/Rule.h"
@@ -314,6 +315,21 @@ void World::randomize(double density, std::uint64_t seed, UniverseRect area)
     m_plane->clear();
     m_plane->setCells(alive, kAlive);
     m_generation = 0;
+}
+
+void World::loadMacrocell(const Macrocell& tree, std::uint64_t memoryBudgetBytes)
+{
+    assert(HashLife::supports(m_rule) && m_automaton == Automaton::LIFE);
+    // Build everything first, so a failed allocation leaves the world as it was.
+    auto plane = std::make_unique<HashLife>(m_rule, memoryBudgetBytes);
+    plane->load(tree);
+    Grid emptyCurrent;
+    Grid emptyNext;
+    m_generation = 0;  // the plane counts the tree's own
+    m_current    = std::move(emptyCurrent);
+    m_next       = std::move(emptyNext);
+    m_population = 0;
+    m_plane      = std::move(plane);
 }
 
 void World::resize(Extent newExtent, bool keepPattern)

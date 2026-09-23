@@ -15,6 +15,7 @@
 #include <utility>
 #include <vector>
 
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 
@@ -229,6 +230,42 @@ void HashLife::clear()
     m_emptyNodes[0] = kDeadCell;
     m_root          = emptyNode(3);
     m_generation    = 0;
+}
+
+void HashLife::load(const Macrocell& tree)
+{
+    clear();
+    try
+    {
+        // Positions in the file count from 1; 0 is empty space, whose node depends on the level.
+        std::vector<NodeId> ids(tree.nodes.size() + 1, kNoNode);
+        for (std::size_t i = 0; i < tree.nodes.size(); ++i)
+        {
+            const MacrocellNode& file = tree.nodes[i];
+            if (file.level == 3)
+            {
+                ids[i + 1] = leafNode(file.leaf);
+                continue;
+            }
+            std::array<NodeId, 4> children{};
+            for (std::size_t c = 0; c < children.size(); ++c)
+            {
+                const std::uint32_t child = file.children.at(c);
+                children.at(c)            = child == 0 ? emptyNode(file.level - 1U) : ids.at(child);
+            }
+            ids[i + 1] = join(children);
+        }
+        if (!tree.nodes.empty())
+        {
+            m_root = shrink(ids.back());
+        }
+        m_generation = tree.generation;
+    }
+    catch (const OutOfNodes&)
+    {
+        clear();
+        throw std::bad_alloc();
+    }
 }
 
 std::expected<void, HashLifeError> HashLife::step(unsigned                   exponent,
@@ -449,6 +486,21 @@ HashLife::NodeId HashLife::emptyNode(unsigned level)
         empty              = join(below, below, below, below);
     }
     return empty;
+}
+
+HashLife::NodeId HashLife::leafNode(std::uint64_t cells)
+{
+    // Squares of 2^level cells with their top-left corner at (x, y), from single cells up.
+    const auto square = [this, cells](const auto& self, unsigned level, int x, int y) -> NodeId {
+        if (level == 0)
+        {
+            return ((cells >> ((y * 8) + x)) & 1U) != 0 ? kAliveCell : kDeadCell;
+        }
+        const int half = 1 << (level - 1);
+        return join(self(self, level - 1, x, y), self(self, level - 1, x + half, y),
+                    self(self, level - 1, x, y + half), self(self, level - 1, x + half, y + half));
+    };
+    return square(square, 3, 0, 0);
 }
 
 void HashLife::rebuildTable(std::size_t slots)

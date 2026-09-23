@@ -5,8 +5,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
+#include <vector>
 
 #include "wxLife/core/Ant.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
@@ -97,6 +99,42 @@ void drawThumbnail(std::span<const core::CellPos> cells, std::span<const core::A
         const Pixel y = top(ant.position.y) + (scale / 2) - (antSize / 2);
         fillRect(out, x, y, x + antSize, y + antSize, style.ant);
     }
+}
+
+void drawThumbnail(const core::HashLife& plane, core::UniverseRect area, PixelSize maxSize,
+                   const RenderStyle& style, PixelBuffer& out)
+{
+    if (area.empty() || maxSize.width <= 0 || maxSize.height <= 0)
+    {
+        out.resize({});
+        return;
+    }
+    // The blocks of 2^level cells that hold `area`, aligned as the plane aligns them.
+    const auto blocksAt = [&area](unsigned level) {
+        const std::int64_t side = std::int64_t{1} << level;
+        return core::UniverseRect{.x0 = core::floorDiv(area.x0, side),
+                                  .y0 = core::floorDiv(area.y0, side),
+                                  .x1 = core::floorDiv(area.x1 - 1, side) + 1,
+                                  .y1 = core::floorDiv(area.y1 - 1, side) + 1};
+    };
+    unsigned           level  = 0;
+    core::UniverseRect blocks = area;
+    while (level < core::HashLife::kMaxLevel &&
+           (blocks.x1 - blocks.x0 > maxSize.width || blocks.y1 - blocks.y0 > maxSize.height))
+    {
+        blocks = blocksAt(++level);
+    }
+    const std::int64_t         side = std::int64_t{1} << level;
+    std::vector<core::CellPos> cells;
+    plane.forEachBlock(area, level, [&](core::UniversePos corner) {
+        cells.push_back(
+            {.x = static_cast<core::Coord>(core::floorDiv(corner.x, side) - blocks.x0),
+             .y = static_cast<core::Coord>(core::floorDiv(corner.y, side) - blocks.y0)});
+    });
+    drawThumbnail(cells, {},
+                  {.width  = static_cast<core::Coord>(blocks.x1 - blocks.x0),
+                   .height = static_cast<core::Coord>(blocks.y1 - blocks.y0)},
+                  maxSize, style, out);
 }
 
 }  // namespace wxLife::render

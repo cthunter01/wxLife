@@ -103,6 +103,12 @@ public:
     /// @pre HashLife::supports(rule()) and automaton() == Automaton::LIFE
     /// @throws std::bad_alloc
     void makeUnbounded(bool keepPattern, std::uint64_t memoryBudgetBytes);
+    /// Turns the world into an unbounded plane holding `tree` (a macrocell pattern, centred as its
+    /// file puts it), at the tree's generation. An existing plane is replaced, with its memory.
+    /// Strong exception guarantee.
+    /// @pre HashLife::supports(rule()) and automaton() == Automaton::LIFE
+    /// @throws std::bad_alloc when the memory budget cannot hold the tree
+    void loadMacrocell(const Macrocell& tree, std::uint64_t memoryBudgetBytes);
     /// @pre an unbounded world only takes rules that HashLife::supports()
     void setRule(const Rule& rule);
     void setTopology(Topology topology) noexcept;

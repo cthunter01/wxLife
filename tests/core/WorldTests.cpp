@@ -17,9 +17,11 @@
 #include <gtest/gtest.h>
 
 #include "support/AsciiGrid.h"
+#include "support/RandomTree.h"
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Grid.h"
 #include "wxLife/core/ParallelBands.h"
+#include "wxLife/core/Pattern.h"
 #include "wxLife/core/Random.h"
 #include "wxLife/core/ReferenceStepper.h"
 #include "wxLife/core/Stepper.h"
@@ -901,6 +903,50 @@ TEST(WorldTest, FarCellsCannotWrapIntoAGrid)
     const std::vector<UniversePos> inside{{.x = 3, .y = 3}};
     EXPECT_EQ(world.setCells(inside, kAlive), 1);
     EXPECT_EQ(world.cellAt({.x = 3, .y = 3}), kAlive);
+}
+
+TEST(WorldTest, AMacrocellBecomesThePlane)
+{
+    constexpr std::uint64_t kBudget = std::uint64_t{1} << 26;
+    World                   world({.width = 10, .height = 10});
+    world.setCell({.x = 1, .y = 1}, kAlive);
+    const auto glider = readPattern("[M2]\n#G 42\n$..*$...*$.***$\n4 1 0 0 0\n");
+    ASSERT_TRUE(glider.has_value());
+    world.loadMacrocell(glider->tree.value(), kBudget);
+    EXPECT_EQ(world.kind(), WorldKind::UNBOUNDED);
+    EXPECT_EQ(world.extent(), (Extent{}));
+    EXPECT_EQ(world.generation(), 42U);
+    EXPECT_EQ(world.population(), 5);
+    EXPECT_EQ(world.cellAt({.x = -6, .y = -7}), kAlive);
+    ASSERT_TRUE(world.stepPlane(2).has_value());
+    EXPECT_EQ(world.generation(), 46U);
+
+    // Another one replaces the plane, generation and all.
+    const auto cell = readPattern("[M2]\n*$\n4 0 0 0 1\n");
+    ASSERT_TRUE(cell.has_value());
+    world.loadMacrocell(cell->tree.value(), kBudget);
+    EXPECT_EQ(world.population(), 1);
+    EXPECT_EQ(world.generation(), 0U);
+    EXPECT_EQ(world.cellAt({.x = 0, .y = 0}), kAlive);
+}
+
+TEST(WorldTest, AMacrocellThatDoesNotFitChangesNothing)
+{
+    World world({.width = 10, .height = 10});
+    world.setCells(std::vector<CellPos>{{.x = 1, .y = 0},
+                                        {.x = 2, .y = 1},
+                                        {.x = 0, .y = 2},
+                                        {.x = 1, .y = 2},
+                                        {.x = 2, .y = 2}},
+                   kAlive);
+    world.step();
+    const Grid before = world.cells();
+    // Twenty thousand random leaves need more nodes than the smallest budget holds.
+    EXPECT_THROW(world.loadMacrocell(test::randomTree(20'000, 3), 1), std::bad_alloc);
+    EXPECT_EQ(world.kind(), WorldKind::FIXED_SIZE);
+    EXPECT_EQ(world.cells(), before);
+    EXPECT_EQ(world.generation(), 1U);
+    EXPECT_EQ(world.population(), 5);
 }
 
 }  // namespace

@@ -5,7 +5,8 @@
 
 # The demo patterns (see core/Demo.cpp) are built into wxLife_lib as char arrays by
 # cmake/EmbedPatterns.cmake, so the program needs no data files next to it on any platform. The generated
-# source is rewritten only when a pattern file changes.
+# source is rewritten only when a pattern file changes. The giant macrocell patterns stay gzip-compressed
+# (.mc.gz) and are unpacked when loaded.
 set(demo_patterns
     acorn.rle b52bomber.rle backrake1.rle bigun.rle blinkerpuffer1.rle breeder1.rle canadagoose.rle
     copperhead.rle diehard.rle glider.rle gosperglidergun.rle gosperglidergun_synth.rle gunstar.rle
@@ -13,7 +14,9 @@ set(demo_patterns
     puffer-train.rle pulsar.rle queenbeeshuttle.rle rabbits.rle rileysbreeder.rle rpentomino.rle
     simkinglidergun.rle spacerake.rle spaceshiprace.rle spider-rake.rle spider.rle
     switch-engine-breeder.rle tumbler.rle turingmachine.rle twinbeesshuttle.rle twinprimecalculator.rle
-    universalturingmachine.rle weekender.rle)
+    universalturingmachine.rle weekender.rle
+    caterpillar.mc.gz centipede.mc.gz demonoid-c512-hashlife-friendly.mc.gz gemini.mc.gz
+    metapixel-galaxy.mc.gz picalculator.mc.gz succ.mc.gz)
 list(TRANSFORM demo_patterns PREPEND ${PROJECT_SOURCE_DIR}/patterns/)
 list(JOIN demo_patterns "|" demo_pattern_arg)   # a ';' would split the argument
 set(embedded_patterns ${CMAKE_CURRENT_BINARY_DIR}/generated/EmbeddedPatterns.cpp)
@@ -23,13 +26,13 @@ add_custom_command(OUTPUT ${embedded_patterns}
     DEPENDS ${demo_patterns} ${PROJECT_SOURCE_DIR}/cmake/EmbedPatterns.cmake
     COMMENT "Embedding the demo patterns"
     VERBATIM)
-# Four megabytes of numbers: nothing for clang-tidy to find, and slow for it to read.
+# Tens of megabytes of numbers: nothing for clang-tidy to find, and slow for it to read.
 set_source_files_properties(${embedded_patterns} PROPERTIES SKIP_LINTING ON)
 
 add_library(wxLife_lib STATIC
-    core/BandedStepper.cpp core/Demo.cpp core/Format.cpp core/Grid.cpp core/HashLife.cpp core/Pacer.cpp
-    core/ParallelBands.cpp core/Pattern.cpp core/PatternSetup.cpp core/ReferenceStepper.cpp core/Rule.cpp
-    core/Speed.cpp core/StepKernel.cpp core/Stepper.cpp core/World.cpp core/WorldLimits.cpp
+    core/BandedStepper.cpp core/Demo.cpp core/Format.cpp core/Grid.cpp core/Gzip.cpp core/HashLife.cpp
+    core/Pacer.cpp core/ParallelBands.cpp core/Pattern.cpp core/PatternSetup.cpp core/ReferenceStepper.cpp
+    core/Rule.cpp core/Speed.cpp core/StepKernel.cpp core/Stepper.cpp core/World.cpp core/WorldLimits.cpp
     ${embedded_patterns}
     render/PixelBuffer.cpp render/Rasterizer.cpp render/Thumbnail.cpp render/Viewport.cpp)
 add_library(wxLife::lib ALIAS wxLife_lib)

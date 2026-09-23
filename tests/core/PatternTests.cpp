@@ -1,6 +1,9 @@
 #include "wxLife/core/Pattern.h"
 
+#include <array>
+#include <cstdint>
 #include <expected>
+#include <format>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -9,6 +12,7 @@
 
 #include "support/AsciiGrid.h"
 #include "wxLife/core/Grid.h"
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/core/WorldLimits.h"
@@ -169,7 +173,7 @@ TEST(PatternTest, RejectsWhatItCannotRead)
     expect("", EMPTY, 0);
     expect(" \n\t\r\n", EMPTY, 0);
     expect("hello", UNKNOWN_FORMAT, 0);
-    expect("[M2] (golly 4.2)\n#R B3/S23\n", UNSUPPORTED_FORMAT, 0, "macrocell (.mc)");
+    expect("#Life 1.05\n#P 0 0\n.*\n", UNSUPPORTED_FORMAT, 0, "Life 1.05");
     expect("#Life 1.06\n0 0\n", UNSUPPORTED_FORMAT, 0, "Life 1.06");
     expect("#N Glider\nbo$2bo$3o!", NO_HEADER, 2);
     expect("#N Only comments\n", NO_HEADER, 2);
@@ -212,15 +216,109 @@ TEST(PatternTest, DescribesEachError)
 {
     using enum PatternErrorKind;
     EXPECT_EQ(describe({.kind = EMPTY, .line = 0, .detail = ""}), "The file is empty.");
-    EXPECT_EQ(describe({.kind = UNSUPPORTED_FORMAT, .line = 0, .detail = "macrocell (.mc)"}),
-              "wxLife reads RLE (.rle) and plaintext (.cells) patterns, not macrocell (.mc) "
-              "files.");
+    EXPECT_EQ(describe({.kind = UNSUPPORTED_FORMAT, .line = 0, .detail = "Life 1.06"}),
+              "wxLife reads RLE (.rle), plaintext (.cells) and macrocell (.mc) patterns, not Life "
+              "1.06 files.");
+    EXPECT_EQ(describe({.kind   = BAD_NODE,
+                        .line   = 4,
+                        .detail = "A node of level 5 has a child of "
+                                  "level 3."}),
+              "Line 4: A node of level 5 has a child of level 3.");
     EXPECT_EQ(describe({.kind = BAD_CHARACTER, .line = 7, .detail = "'q'"}),
               "Line 7: Unexpected character 'q'.");
     EXPECT_EQ(describe({.kind = UNSUPPORTED_RULE, .line = 1, .detail = "LifeHistory"}),
               "Line 1: wxLife runs two-state B/S rules such as B3/S23, not \"LifeHistory\".");
     EXPECT_EQ(describe({.kind = TOO_LARGE, .line = 3, .detail = ""}),
               "Line 3: The pattern is wider or taller than 100,000 cells.");
+}
+
+TEST(PatternTest, ReadsMacrocells)
+{
+    // A glider in the north-west quarter of a 16 × 16 root, which is centred on (0, 0): the leaf's
+    // top-left cell is (-8, -8).
+    const Pattern glider = read(
+        "[M2] (golly 4.2)\n"
+        "#R B3/S23\n"
+        "#G 12\n"
+        "#C A glider, north-west of the centre\n"
+        "$..*$...*$.***$\n"
+        "4 1 0 0 0\n");
+    ASSERT_TRUE(glider.tree.has_value());
+    const Macrocell& tree = glider.tree.value();
+    EXPECT_TRUE(glider.cells.empty());
+    EXPECT_EQ(glider.extent, (Extent{}));
+    EXPECT_EQ(glider.rule, Rule{});
+    EXPECT_EQ(glider.comments, (std::vector<std::string>{"A glider, north-west of the centre"}));
+    EXPECT_EQ(tree.generation, 12U);
+    EXPECT_EQ(tree.population, 5U);
+    EXPECT_EQ(tree.bounds, (UniverseRect{.x0 = -7, .y0 = -7, .x1 = -4, .y1 = -4}));
+    ASSERT_EQ(tree.nodes.size(), 2U);
+    EXPECT_EQ(tree.nodes[0].level, 3);
+    EXPECT_EQ(tree.nodes[0].leaf, (1ULL << 10) | (1ULL << 19) | (7ULL << 25));
+    EXPECT_EQ(tree.nodes[1].level, 4);
+    EXPECT_EQ(tree.nodes[1].children, (std::array<std::uint32_t, 4>{1, 0, 0, 0}));
+
+    // Shared nodes: one cell, four times in node 2, which is the NE and SW child of the root. The
+    // cells are (16, 0), (24, 0), (16, 8), (24, 8), (0, 16), … (8, 24) from the root's corner.
+    const Pattern shared = read("[M2]\n*$\n4 1 1 1 1\n5 0 2 2 0\n");
+    ASSERT_TRUE(shared.tree.has_value());
+    EXPECT_EQ(shared.tree.value().population, 8U);
+    EXPECT_EQ(shared.tree.value().bounds, (UniverseRect{.x0 = -16, .y0 = -16, .x1 = 9, .y1 = 9}));
+    EXPECT_FALSE(shared.rule.has_value());
+    EXPECT_EQ(shared.tree.value().generation, 0U);
+
+    // No nodes, or only empty ones: no cells.
+    const Pattern empty = read("[M2] (golly 4.2)\r\n#R B36/S23\r\n");
+    ASSERT_TRUE(empty.tree.has_value());
+    EXPECT_TRUE(empty.tree.value().nodes.empty());
+    EXPECT_EQ(empty.tree.value().population, 0U);
+    EXPECT_TRUE(empty.tree.value().bounds.empty());
+    EXPECT_EQ(empty.rule, Rule::parse("B36/S23"));
+    EXPECT_EQ(read("[M2]\n$$\n4 1 1 0 0\n").tree.value().population, 0U);
+}
+
+TEST(PatternTest, RejectsBrokenMacrocells)
+{
+    using enum PatternErrorKind;
+    const auto expect = [](std::string_view text, PatternErrorKind kind, int line,
+                           std::string_view detail = {}) {
+        const PatternError error = failure(text);
+        EXPECT_EQ(error.kind, kind) << text;
+        EXPECT_EQ(error.line, line) << text;
+        EXPECT_EQ(error.detail, detail) << text;
+    };
+    expect("[M2]\n$..#$\n", BAD_CHARACTER, 2, "'#'");
+    expect("[M2]\nhello\n", BAD_CHARACTER, 2, "'h'");
+    expect("[M2]\n.........*$\n", BAD_NODE, 2, "A leaf is wider or taller than 8 cells.");
+    expect("[M2]\n$$$$$$$$*$\n", BAD_NODE, 2, "A leaf is wider or taller than 8 cells.");
+    expect("[M2]\n*$\n4 2 0 0 0\n", BAD_NODE, 3,
+           "A node refers to node 2, which does not come before it.");
+    expect("[M2]\n*$\n5 1 0 0 0\n", BAD_NODE, 3, "A node of level 5 has a child of level 3.");
+    expect("[M2]\n3 0 0 0 0\n", BAD_NODE, 2, "A node of level 3 would be no larger than a leaf.");
+    expect("[M2]\n63 0 0 0 0\n", BAD_NODE, 2,
+           "The pattern is larger than the universe, 2^62 cells across.");
+    expect("[M2]\n4 0 0 0\n", BAD_NODE, 2, "Cannot read the node \"4 0 0 0\".");
+    expect("[M2]\n4 0 0 0 0 0\n", BAD_NODE, 2, "Cannot read the node \"4 0 0 0 0 0\".");
+    expect("[M2]\n4 0 x 0 0\n", BAD_NODE, 2, "Cannot read the node \"4 0 x 0 0\".");
+    expect("[M2]\n4 0,0 0 0\n", BAD_NODE, 2, "Cannot read the node \"4 0,0 0 0\".");
+    expect("[M2]\n1 0 1 0 1\n", UNSUPPORTED_FORMAT, 0, "multi-state macrocell");
+    expect("[M2]\n#R Wireworld\n", UNSUPPORTED_RULE, 2, "Wireworld");
+    expect("[M2]\n#G many\n", BAD_HEADER, 2, "#G many");
+
+    // A full leaf, doubled on each side level after level: 4^32 cells at level 32 are more than
+    // the counts hold.
+    std::string full = "[M2]\n";
+    for (int row = 0; row < 8; ++row)
+    {
+        full += "********$";
+    }
+    full += "\n";
+    for (int level = 4; level <= 33; ++level)
+    {
+        const int previous = level - 3;  // the line of nodes before, counted from 1
+        full += std::format("{} {} {} {} {}\n", level, previous, previous, previous, previous);
+    }
+    expect(full, BAD_NODE, 31, "The pattern has too many live cells.");
 }
 
 }  // namespace

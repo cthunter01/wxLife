@@ -21,20 +21,23 @@ namespace wxLife::core
 enum class DemoCategory : std::uint8_t
 {
     SPACESHIPS,
+    GIANT_SPACESHIPS,
     GUNS,
     PUFFERS_AND_RAKES,
     BREEDERS,
     METHUSELAHS,
     OSCILLATORS,
     COMPUTATION,
+    LIFE_IN_LIFE,
     LANGTONS_ANT,
 };
 
 /// Every DemoCategory, in the order the demo list shows them.
 inline constexpr std::array kDemoCategories{
-    DemoCategory::SPACESHIPS,  DemoCategory::GUNS,        DemoCategory::PUFFERS_AND_RAKES,
-    DemoCategory::BREEDERS,    DemoCategory::METHUSELAHS, DemoCategory::OSCILLATORS,
-    DemoCategory::COMPUTATION, DemoCategory::LANGTONS_ANT};
+    DemoCategory::SPACESHIPS,        DemoCategory::GIANT_SPACESHIPS, DemoCategory::GUNS,
+    DemoCategory::PUFFERS_AND_RAKES, DemoCategory::BREEDERS,         DemoCategory::METHUSELAHS,
+    DemoCategory::OSCILLATORS,       DemoCategory::COMPUTATION,      DemoCategory::LIFE_IN_LIFE,
+    DemoCategory::LANGTONS_ANT};
 
 [[nodiscard]] constexpr std::string_view toString(DemoCategory c) noexcept
 {
@@ -42,6 +45,8 @@ inline constexpr std::array kDemoCategories{
     {
         case DemoCategory::SPACESHIPS:
             return "Spaceships";
+        case DemoCategory::GIANT_SPACESHIPS:
+            return "Giant spaceships";
         case DemoCategory::GUNS:
             return "Guns";
         case DemoCategory::PUFFERS_AND_RAKES:
@@ -54,6 +59,8 @@ inline constexpr std::array kDemoCategories{
             return "Oscillators";
         case DemoCategory::COMPUTATION:
             return "Computation";
+        case DemoCategory::LIFE_IN_LIFE:
+            return "Life in Life";
         case DemoCategory::LANGTONS_ANT:
             return "Langton's ant";
     }
@@ -74,15 +81,24 @@ struct Demo
     std::string_view about;     ///< What it is and what to watch for.
     /// The embedded pattern file (wxLife/core/EmbeddedFile.h); empty for ants on an empty world.
     std::string_view file{};
-    Extent           world;
-    Topology         topology = Topology::BOUNDED;
-    /// Top-left corner of the pattern in the world; nullopt centres it.
+    /// A fixed-size world runs in `world` with `topology`; an unbounded plane needs neither.
+    WorldKind kind = WorldKind::FIXED_SIZE;
+    Extent    world{};
+    Topology  topology = Topology::BOUNDED;
+    /// Top-left corner of the pattern: in a fixed-size world, where nullopt centres it; on a
+    /// plane, where nullopt centres it on (0, 0). A macrocell stays where its file puts it.
     std::optional<CellPos> origin{};
     Speed                  speed{};
-    /// The cells to show first, relative to the pattern's top-left corner; nullopt fits the world.
+    /// On a plane: generations per step, 2^stepExponent.
+    unsigned stepExponent = 0;
+    /// The cells to show first, relative to the pattern's top-left corner (a macrocell's: the
+    /// corner of its bounding box); nullopt fits the world, or on a plane the pattern.
     std::optional<CellRect> view{};
     Automaton               automaton = Automaton::LIFE;
     std::span<const Ant>    ants{};  ///< Where the ants start; only for Automaton::LANGTON_ANT.
+    /// On a plane: about how much memory the demo needs to run smoothly; 0 when little. The demo
+    /// list warns when the memory budget is smaller.
+    std::uint64_t memoryNeeded = 0;
     // NOLINTEND(readability-redundant-member-init)
 };
 

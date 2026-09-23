@@ -35,9 +35,9 @@ platforms it supports (`gcc-*` and `headless`: Linux; `clang-*`: Linux and macOS
   executable (`Main.cpp`; a GUI-subsystem program on Windows, `wxLife.app` on macOS)
 - `tests/<layer>/`: GoogleTest files, all in `wxLife_tests`; `tests/support/`: helpers
 - `tools/bench/`: `wxLife_bench`, the headless stepping benchmark
-- `patterns/`: the demo patterns' RLE files, embedded into `wxLife_lib` by `cmake/EmbedPatterns.cmake`. Each
-  is listed in `demo_patterns` (`src/CMakeLists.txt`) and used by a demo in `src/core/Demo.cpp`; `DemoTest`
-  checks both. `patterns/README.md` says how to add one
+- `patterns/`: the demo patterns' files, RLE and gzip-compressed macrocell (`.mc.gz`), embedded into
+  `wxLife_lib` by `cmake/EmbedPatterns.cmake`. Each is listed in `demo_patterns` (`src/CMakeLists.txt`) and
+  used by a demo in `src/core/Demo.cpp`; `DemoTest` checks both. `patterns/README.md` says how to add one
 - `cmake/ProjectOptions.cmake`: `wxLife_configure_target()` (warnings, sanitizers, coverage, tidy)
 - `cmake/Dependencies.cmake`: third-party libraries via FetchContent (GoogleTest, static wxWidgets)
 - `docs/architecture.md`: the design, and where to extend it

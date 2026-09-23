@@ -12,14 +12,18 @@ world runs smoothly at every zoom level, and a 10000 × 10000 world stays usable
 
 - Any B/S rule (`B3/S23`, `B36/S23`, `B/S`, …) plus ten presets: Conway's Life, HighLife, Seeds,
   Day & Night, Life without Death, Maze, 2x2, Replicator, Diamoeba and Morley.
-- **Demo patterns**: File → Demo Patterns… (or the panel's Demos… button) lists 43 famous patterns in
-  eight groups: spaceships, guns, puffers and rakes, breeders, methuselahs, oscillators, computation
-  (the Primer prime sieve, the twin prime and (p, p+8) prime calculators, and Paul Rendell's Turing
-  machine and universal Turing machine) and Langton's ant setups. The dialog shows who found each one,
-  a preview and what to watch for. Loading one sets up the world it runs best in: size, edges, speed
-  and the part of the world to show.
-- **Pattern files**: File → Open Pattern… reads RLE (`.rle`) and plaintext (`.cells`) files, such as
-  the ones on LifeWiki, into a world with room around the pattern.
+- **Demo patterns**: File → Demo Patterns… (or the panel's Demos… button) lists 50 famous patterns in
+  ten groups: spaceships; giant spaceships (the Caterpillar, of 12 million cells, the Centipede, the
+  self-constructing Demonoid and Gemini); guns; puffers and rakes; breeders; methuselahs; oscillators;
+  computation (the Primer prime sieve and two more prime calculators, Paul Rendell's Turing machine and
+  universal Turing machine, Adam P. Goucher's pi calculator and his Spartan universal
+  computer-constructor); Life in Life (Kok's galaxy built from OTCA metapixels); and Langton's ant
+  setups. The dialog shows who found each one, a preview and what to watch for. Loading one sets up
+  the world it runs best in: size, edges, speed, step size and the part of the world to show.
+- **Pattern files**: File → Open Pattern… reads RLE (`.rle`), plaintext (`.cells`) and macrocell (`.mc`)
+  files, such as the ones on LifeWiki and in Golly's collection, also gzip-compressed (`.mc.gz`,
+  `.rle.gz`). A macrocell pattern, which can be far larger than any list of cells, opens on an
+  unbounded plane.
 - **Langton's ant** as a second automaton, chosen in Simulation → Automaton or in the side panel. Each
   ant turns right on a dead cell and left on a live one, flips the cell and steps forward; a generation
   is one move for every ant. Up to 64 ants share a world and move in order, so each one sees what the
@@ -323,21 +327,27 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
   edges, rule, speed and automaton the demo was tuned for. Every setting was chosen by running the
   demo: gliders from the guns vanish cleanly at the dead edges, and the methuselahs evolve exactly as
   on an unbounded plane.
-  - The prime calculators send streams of spaceships up and to the right, which an unbounded plane
-    would swallow. Here they crash into the edges, and the wreckage comes back after 8,000 to 14,000
-    generations; each description says how far its calculator is right until then.
-  - The universal Turing machine's world needs about 330 MB. A demo that does not fit the memory
-    budget is listed but cannot be loaded, and the dialog says why.
-  - Patterns far larger than a fixed-size world can be, such as the Caterpillar spaceship (4,195 ×
-    330,721 cells), are published as macrocell files, which wxLife does not read yet, so they are not
-    included. [patterns/README.md](patterns/README.md) lists the sources and how to add a demo.
+  - The prime calculators send streams of spaceships up and to the right, so they run on unbounded
+    planes, which swallow them, in steps of 32 generations. They go on finding primes for as long as
+    they run.
+  - The giant patterns come as macrocell files and run on unbounded planes too, in steps of 2^10 to
+    2^30 generations. HashLife is slow on a pattern at first, while it learns it, and fast once it
+    has: the Caterpillar's first step takes several seconds, and later ones take milliseconds. Some
+    need a lot of memory: about 2 GB for the Caterpillar and 4 GB for Gemini, which is slow to run in
+    any case. When the memory budget is smaller, the dialog says so; the demo still loads, but may run
+    slowly or stop with a message.
+  - The universal Turing machine's world needs about 330 MB. A fixed-size demo that does not fit the
+    memory budget is listed but cannot be loaded, and the dialog says why.
+  - [patterns/README.md](patterns/README.md) lists the sources and how to add a demo.
 - **Pattern files.** File → Open Pattern… puts the pattern in the middle of a new world with half its
   size, but at least 50 cells, of room on each side, shrunk to fit the memory budget if needed. The
   rule is the one the file names (RLE `rule =` or `#r`); a file without one keeps the current rule, and
   the edges and the speed stay as they are. On an unbounded plane the pattern goes onto the cleared
-  plane, centred on (0, 0); a file whose rule has B0 is refused there with a message. Macrocell
-  (`.mc`), Life 1.05/1.06 and multi-state files are refused with a message, and so is a pattern wider
-  or taller than 100,000 cells.
+  plane, centred on (0, 0); a file whose rule has B0 is refused there with a message. A macrocell
+  file always opens on an unbounded plane, with its cells where the file puts them and at the
+  generation it gives (`#G`). Files compressed with gzip are unpacked first; a damaged one is refused.
+  Life 1.05/1.06 and multi-state files are refused with a message, and so is an RLE or plaintext
+  pattern wider or taller than 100,000 cells, or a file over 256 MB, packed or unpacked.
 - **Engine.** The Reference engine can be chosen only for worlds of up to 1,000,000 cells. Resizing to
   a larger world switches back to Banded. Only Life uses an engine at all.
 - **Langton's ant.** A world carries 0 to 64 ants. Switching to the ant seeds one in the middle;
@@ -448,9 +458,15 @@ the GUI smoke tests do not run at all, the whole list is the only check of the i
       double click or Enter on a demo loads it, on a group opens or closes the group. With
       `GDK_SCALE=2` the preview is sharp.
 - [ ] Load the Primer and run it at Max: lightweight spaceships leave the sieve to the left, 120
-      generations apart for 2, 3, 5 and 7.
-- [ ] File → Open Pattern…: open an `.rle` and a `.cells` file downloaded from LifeWiki, and a text file
-      that is neither, which is refused with a message.
+      generations apart for 2, 3, 5 and 7, and go on past 100 without wreckage coming back.
+- [ ] Load the Caterpillar: the preview is a thin vertical line, and the world opens zoomed out on
+      all of it. Run it: after "Computing…" for the first steps, it moves up smoothly.
+- [ ] Load the Pi calculator and run it: within a minute or two the digits 3 and 1 appear along the
+      diagonal stripe in the view.
+- [ ] Load Kok's galaxy in OTCA metapixels and run it: the 15 × 15 metapixels switch on and off like
+      the cells of Kok's galaxy.
+- [ ] File → Open Pattern…: open an `.rle` and a `.cells` file downloaded from LifeWiki, a `.mc.gz` file
+      from Golly's collection, and a text file that is none of them, which is refused with a message.
 - [ ] World → Size…, Unbounded, keeping the pattern: the pattern stays, the panel shows the memory in
       use, and Wrap Edges, the Engine submenu and the automaton choice are greyed out.
 - [ ] On the plane, open the Gosper glider gun, set the step to 2^10 with F8 or `}`, and run at Max:

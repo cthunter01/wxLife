@@ -17,6 +17,7 @@
 #include <utility>
 #include <vector>
 
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 
@@ -121,6 +122,11 @@ public:
     CellCount setCells(std::span<const CellPos> cells, Cell value, UniversePos offset = {});
     /// Every cell dead, generation 0, and all memory but the empty plane released.
     void clear();
+    /// Replaces the plane with `tree`, its root centred on (0, 0) as in the file, and the
+    /// generation with the tree's. The rule stays. Nodes the file shares stay shared, so this
+    /// costs about one node per node of the file, however many cells they hold.
+    /// @throws std::bad_alloc when the memory budget is too small; the plane is then empty.
+    void load(const Macrocell& tree);
 
     /// Advances 2^exponent generations. On failure nothing changes; a cancelled step keeps the
     /// results it has already worked out, so the next one is quicker.
@@ -177,6 +183,8 @@ private:
     [[nodiscard]] NodeId join(NodeId nw, NodeId ne, NodeId sw, NodeId se);
     [[nodiscard]] NodeId join(const std::array<NodeId, 4>& children);
     [[nodiscard]] NodeId emptyNode(unsigned level);
+    /// The level-3 node of a macrocell leaf (MacrocellNode::leaf).
+    [[nodiscard]] NodeId leafNode(std::uint64_t cells);
     /// Puts every node but the two single cells into a new table of `slots` slots.
     void                      rebuildTable(std::size_t slots);
     [[nodiscard]] std::size_t slotOf(const std::array<NodeId, 4>& children) const noexcept;

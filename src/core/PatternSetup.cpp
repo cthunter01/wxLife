@@ -27,24 +27,32 @@ namespace
 
 PatternSetup demoSetup(const Demo& demo, const Pattern& pattern)
 {
-    const CellPos origin = demo.origin.value_or(centred(pattern.extent, demo.world));
-    PatternSetup  setup{
-        .kind      = WorldKind::FIXED_SIZE,
-        .world     = demo.world,
-        .origin    = origin,
-        .topology  = demo.topology,
-        .rule      = pattern.rule.value_or(Rule{}),
-        .automaton = demo.automaton,
-        .ants      = {demo.ants.begin(), demo.ants.end()},
-        .speed     = demo.speed,
-        .view      = std::nullopt,
+    const bool    unbounded = demo.kind == WorldKind::UNBOUNDED;
+    const CellPos origin    = demo.origin.value_or(
+        unbounded ? CellPos{.x = -(pattern.extent.width / 2), .y = -(pattern.extent.height / 2)}
+                  : centred(pattern.extent, demo.world));
+    PatternSetup setup{
+        .kind         = demo.kind,
+        .world        = unbounded ? Extent{} : demo.world,
+        .origin       = origin,
+        .topology     = demo.topology,
+        .rule         = pattern.rule.value_or(Rule{}),
+        .automaton    = demo.automaton,
+        .ants         = {demo.ants.begin(), demo.ants.end()},
+        .speed        = demo.speed,
+        .stepExponent = unbounded ? std::optional(demo.stepExponent) : std::nullopt,
+        .view         = std::nullopt,
     };
     if (demo.view)
     {
-        setup.view = CellRect{.x0 = demo.view->x0 + origin.x,
-                              .y0 = demo.view->y0 + origin.y,
-                              .x1 = demo.view->x1 + origin.x,
-                              .y1 = demo.view->y1 + origin.y};
+        // The pattern's top-left corner: a macrocell's is where its file puts its cells.
+        const UniversePos corner =
+            pattern.tree ? UniversePos{.x = pattern.tree->bounds.x0, .y = pattern.tree->bounds.y0}
+                         : UniversePos{.x = origin.x, .y = origin.y};
+        setup.view = UniverseRect{.x0 = corner.x + demo.view->x0,
+                                  .y0 = corner.y + demo.view->y0,
+                                  .x1 = corner.x + demo.view->x1,
+                                  .y1 = corner.y + demo.view->y1};
     }
     return setup;
 }
@@ -53,19 +61,35 @@ std::expected<PatternSetup, ExtentError> fileSetup(const Pattern& pattern, const
                                                    WorldKind currentKind, Topology currentTopology,
                                                    std::uint64_t memoryBudgetBytes)
 {
+    if (pattern.tree)
+    {
+        return PatternSetup{
+            .kind         = WorldKind::UNBOUNDED,
+            .world        = {},
+            .origin       = {},
+            .topology     = currentTopology,
+            .rule         = pattern.rule.value_or(currentRule),
+            .automaton    = Automaton::LIFE,
+            .ants         = {},
+            .speed        = std::nullopt,
+            .stepExponent = std::nullopt,
+            .view         = std::nullopt,
+        };
+    }
     const Extent size = pattern.extent;
     if (currentKind == WorldKind::UNBOUNDED)
     {
         return PatternSetup{
-            .kind      = WorldKind::UNBOUNDED,
-            .world     = {},
-            .origin    = {.x = -(size.width / 2), .y = -(size.height / 2)},
-            .topology  = currentTopology,
-            .rule      = pattern.rule.value_or(currentRule),
-            .automaton = Automaton::LIFE,
-            .ants      = {},
-            .speed     = std::nullopt,
-            .view      = std::nullopt,
+            .kind         = WorldKind::UNBOUNDED,
+            .world        = {},
+            .origin       = {.x = -(size.width / 2), .y = -(size.height / 2)},
+            .topology     = currentTopology,
+            .rule         = pattern.rule.value_or(currentRule),
+            .automaton    = Automaton::LIFE,
+            .ants         = {},
+            .speed        = std::nullopt,
+            .stepExponent = std::nullopt,
+            .view         = std::nullopt,
         };
     }
     const auto side = [](Coord length, Coord margin) {
@@ -89,15 +113,16 @@ std::expected<PatternSetup, ExtentError> fileSetup(const Pattern& pattern, const
         return std::unexpected(valid.error());
     }
     return PatternSetup{
-        .kind      = WorldKind::FIXED_SIZE,
-        .world     = world,
-        .origin    = centred(size, world),
-        .topology  = currentTopology,
-        .rule      = pattern.rule.value_or(currentRule),
-        .automaton = Automaton::LIFE,
-        .ants      = {},
-        .speed     = std::nullopt,
-        .view      = std::nullopt,
+        .kind         = WorldKind::FIXED_SIZE,
+        .world        = world,
+        .origin       = centred(size, world),
+        .topology     = currentTopology,
+        .rule         = pattern.rule.value_or(currentRule),
+        .automaton    = Automaton::LIFE,
+        .ants         = {},
+        .speed        = std::nullopt,
+        .stepExponent = std::nullopt,
+        .view         = std::nullopt,
     };
 }
 

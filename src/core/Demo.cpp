@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cassert>
+#include <cstdint>
 #include <optional>
 #include <span>
 #include <string_view>
@@ -26,6 +27,8 @@ namespace
 
 /// Max; leaving it drops to 60 gen/s.
 constexpr Speed kMaxSpeed{.gensPerSecond = 60, .unlimited = true};
+
+constexpr std::uint64_t kGiB = std::uint64_t{1} << 30;
 
 // The ant demos start on an empty world, so the ants are all there is.
 constexpr std::array kLangtonsAnt{
@@ -145,6 +148,71 @@ constexpr std::array kDemos{
         .world    = {.width = 40, .height = 90},
         .topology = Topology::TORUS,
         .speed    = perSecond(20),
+    },
+
+    // Giant spaceships, from macrocell files, on unbounded planes. The step sizes and memory needs
+    // come from running each one: the first steps fill HashLife's memory, the later ones are fast.
+    Demo{
+        .name     = "Caterpillar",
+        .category = DemoCategory::GIANT_SPACESHIPS,
+        .credit   = "Gabriel Nivasch, Jason Summers and David Bell, 2004",
+        .about    = "A spaceship of about 12 million cells, 4,195 by 330,721, moving up at 17c/45: "
+                    "every 270 generations it is back in its own shape, 102 cells further on. "
+                    "Lightweight spaceships made near its back take almost 2.7 million "
+                    "generations to reach the front, where they feed the reaction that drives it; "
+                    "zoom in on the front end to watch it. The first steps take a while, and it "
+                    "needs about 2 GB of memory to run smoothly.",
+        .file     = "caterpillar.mc.gz",
+        .kind     = WorldKind::UNBOUNDED,
+        .speed    = kMaxSpeed,
+        .stepExponent = 10,
+        .memoryNeeded = 2 * kGiB,
+    },
+    Demo{
+        .name         = "Centipede",
+        .category     = DemoCategory::GIANT_SPACESHIPS,
+        .credit       = "Chris Cain, 2014",
+        .about        = "A 31c/240 spaceship of about 620,000 cells, 11,652 by 126,714, moving up: "
+                        "every 240 generations it is 31 cells further on. It reuses most of the "
+                        "circuitry of the shield bug, built the same day, behind a more compact front "
+                        "end. It needs about 1 GB of memory to run smoothly.",
+        .file         = "centipede.mc.gz",
+        .kind         = WorldKind::UNBOUNDED,
+        .speed        = kMaxSpeed,
+        .stepExponent = 10,
+        .memoryNeeded = kGiB,
+    },
+    Demo{
+        .name     = "Demonoid",
+        .category = DemoCategory::GIANT_SPACESHIPS,
+        .credit   = "Chris Cain and Dave Greene, 2015; this version by Dave Greene, 2019",
+        .about    = "A self-constructing spaceship. A stream of gliders drives its construction "
+                    "arm, which builds a new copy of the machinery ahead of it, while the old "
+                    "copy behind is torn down. This version moves 4,096 cells up and to the right "
+                    "every 2,097,152 (2^21) generations, which suits HashLife: once the first "
+                    "cycle has been worked out, which takes a while, it flies.",
+        .file     = "demonoid-c512-hashlife-friendly.mc.gz",
+        .kind     = WorldKind::UNBOUNDED,
+        .speed    = kMaxSpeed,
+        .stepExponent = 16,
+        .memoryNeeded = kGiB,
+    },
+    Demo{
+        .name     = "Gemini",
+        .category = DemoCategory::GIANT_SPACESHIPS,
+        .credit   = "Andrew J. Wade, 2010",
+        .about    = "The first oblique spaceship ever built. Its two identical halves, each with "
+                    "three construction arms, pass a tape of gliders between them that tells each "
+                    "to delete its parent and build its daughter. Every 33,699,586 generations it "
+                    "has moved 5,120 cells one way and 1,024 the other. It spans more than 4 "
+                    "million cells each way but has only 846,278 live cells. It is slow to run: a "
+                    "step of 65,536 generations takes a second or more, and it needs about 4 GB of "
+                    "memory.",
+        .file     = "gemini.mc.gz",
+        .kind     = WorldKind::UNBOUNDED,
+        .speed    = kMaxSpeed,
+        .stepExponent = 16,
+        .memoryNeeded = 4 * kGiB,
     },
 
     // Guns. The gliders die cleanly at the dead edges, so each gun fires forever.
@@ -415,10 +483,9 @@ constexpr std::array kDemos{
         .speed    = perSecond(10),
     },
 
-    // Computation. The prime calculators send streams up and to the right that an unbounded
-    // plane would swallow; here they crash into the edges, and the wreckage takes thousands of
-    // generations to come back. The worlds are as large as that needs, and each description says
-    // how far its calculator gets.
+    // Computation. The prime calculators send streams up and to the right, which an unbounded
+    // plane swallows; in a fixed-size world they would crash into the edges and come back as
+    // wreckage.
     Demo{
         .name     = "Primer",
         .category = DemoCategory::COMPUTATION,
@@ -426,13 +493,13 @@ constexpr std::array kDemos{
         .about    = "A prime number sieve. Every lightweight spaceship that escapes to the left "
                     "stands for a prime p and leaves at generation 120 p plus a constant, so they "
                     "come 120 generations apart for 2, 3, 5, 7, and the gaps are the numbers the "
-                    "sieve has struck out. In this world it is right up to 67, about 9,000 "
-                    "generations; then wreckage from the edges arrives.",
+                    "sieve has struck out. On the unbounded plane nothing comes back to spoil "
+                    "it, so it goes on finding primes for as long as it runs.",
         .file     = "primer.rle",
-        .world    = {.width = 3840, .height = 3694},
-        .origin   = CellPos{.x = 400, .y = 3000},
+        .kind     = WorldKind::UNBOUNDED,
         .speed    = kMaxSpeed,
-        .view     = CellRect{.x0 = -300, .y0 = -40, .x1 = 480, .y1 = 334},
+        .stepExponent = 5,
+        .view         = CellRect{.x0 = -300, .y0 = -40, .x1 = 480, .y1 = 334},
     },
     Demo{
         .name     = "Twin prime calculator",
@@ -440,13 +507,12 @@ constexpr std::array kDemos{
         .credit   = "Dean Hickerson, 1994",
         .about    = "The Primer, changed so that a spaceship escapes to the left only when p and "
                     "p + 2 are both prime: for 5, 11, 17, 29, 41 and 59, each 120 p generations "
-                    "after the start plus a constant. In this world it is right up to 59, about "
-                    "8,000 generations; then wreckage from the edges arrives.",
+                    "after the start plus a constant, and on for as long as it runs.",
         .file     = "twinprimecalculator.rle",
-        .world    = {.width = 3840, .height = 3694},
-        .origin   = CellPos{.x = 400, .y = 3000},
+        .kind     = WorldKind::UNBOUNDED,
         .speed    = kMaxSpeed,
-        .view     = CellRect{.x0 = -300, .y0 = -40, .x1 = 480, .y1 = 334},
+        .stepExponent = 5,
+        .view         = CellRect{.x0 = -300, .y0 = -40, .x1 = 480, .y1 = 334},
     },
     Demo{
         .name     = "(p, p+8) prime calculator",
@@ -454,13 +520,46 @@ constexpr std::array kDemos{
         .credit   = "Nathaniel Johnston, 2009",
         .about    = "A spaceship escapes to the left for every p where p and p + 8 are both prime: "
                     "5, 11, 23, 29, 53, 59, 71, 89, 101, each 120 p generations after the start "
-                    "plus a constant. In this world it is right up to 101, about 14,000 "
-                    "generations; then wreckage from the edges arrives.",
+                    "plus a constant, and on for as long as it runs.",
         .file     = "pp8primecalculator.rle",
-        .world    = {.width = 4422, .height = 4018},
-        .origin   = CellPos{.x = 400, .y = 3000},
+        .kind     = WorldKind::UNBOUNDED,
         .speed    = kMaxSpeed,
-        .view     = CellRect{.x0 = -300, .y0 = -40, .x1 = 1062, .y1 = 658},
+        .stepExponent = 5,
+        .view         = CellRect{.x0 = -300, .y0 = -40, .x1 = 1062, .y1 = 658},
+    },
+    Demo{
+        .name     = "Pi calculator",
+        .category = DemoCategory::COMPUTATION,
+        .credit   = "Adam P. Goucher, 2010",
+        .about    = "A computer of 188 states that works out the decimal digits of pi, in binary "
+                    "with a streaming spigot algorithm, and prints them as dot-matrix digits of "
+                    "blocks along a diagonal stripe: 3.1… from lower left to upper right. It is "
+                    "slow: each digit takes tens of billions of generations, so the steps here "
+                    "are a billion generations each. The view starts on the digits; zoom out for "
+                    "the whole machine, 117,573 by 155,887 cells.",
+        .file     = "picalculator.mc.gz",
+        .kind     = WorldKind::UNBOUNDED,
+        .speed    = kMaxSpeed,
+        .stepExponent = 30,
+        // Around the first digits, relative to the corner of the bounding box.
+        .view         = CellRect{.x0 = 70472, .y0 = -2679, .x1 = 74472, .y1 = 1321},
+        .memoryNeeded = 2 * kGiB,
+    },
+    Demo{
+        .name     = "Spartan universal computer-constructor",
+        .category = DemoCategory::COMPUTATION,
+        .credit   = "Adam P. Goucher, 2009",
+        .about    = "A universal computer with a construction arm, built only from still lifes of "
+                    "seven cells or fewer. It has eleven sliding-block registers, eight two-state "
+                    "gates, a read-only program tape of eaters and two tapes of blocks it can "
+                    "change. With a long enough program it could build a copy of itself. It "
+                    "computes very slowly; zoom in on the machinery at the upper left and let it "
+                    "run.",
+        .file     = "succ.mc.gz",
+        .kind     = WorldKind::UNBOUNDED,
+        .speed    = kMaxSpeed,
+        .stepExponent = 20,
+        .memoryNeeded = kGiB,
     },
     Demo{
         .name     = "Turing machine",
@@ -485,6 +584,23 @@ constexpr std::array kDemos{
         .world    = {.width = 12800, .height = 12800},
         .speed    = kMaxSpeed,
         .view     = CellRect{.x0 = 4950, .y0 = 5526, .x1 = 7150, .y1 = 8426},
+    },
+
+    // Life in Life.
+    Demo{
+        .name     = "Kok's galaxy in OTCA metapixels",
+        .category = DemoCategory::LIFE_IN_LIFE,
+        .credit   = "Metapixel by Brice Due, 2006; galaxy by Jan Kok, 1971",
+        .about    = "Life simulating itself. Each of the 15 by 15 cells here is an OTCA metapixel, "
+                    "a pattern of 2,048 by 2,048 cells that behaves like one cell of any Life-like "
+                    "rule, here Conway's: every 35,328 generations it switches on or off according "
+                    "to its eight neighbours. Together they run Kok's galaxy, an oscillator of "
+                    "period 8. Zoom in on a metapixel to see the machinery that counts its "
+                    "neighbours.",
+        .file     = "metapixel-galaxy.mc.gz",
+        .kind     = WorldKind::UNBOUNDED,
+        .speed    = kMaxSpeed,
+        .stepExponent = 11,
     },
 
     // Langton's ant. The ants always wrap around the edges.
@@ -558,7 +674,7 @@ Pattern demoPattern(const Demo& demo)
     {
         return {};
     }
-    auto pattern = readPattern(*text);
+    auto pattern = readPatternData(*text);
     assert(pattern.has_value());
     return pattern ? *std::move(pattern) : Pattern{};
 }

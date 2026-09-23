@@ -1,12 +1,15 @@
 #include "wxLife/render/Thumbnail.h"
 
 #include <array>
+#include <cstdint>
 #include <string>
 #include <vector>
 
 #include <gtest/gtest.h>
 
 #include "wxLife/core/Ant.h"
+#include "wxLife/core/HashLife.h"
+#include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
@@ -129,6 +132,39 @@ TEST(ThumbnailTest, NothingToDrawGivesAnEmptyPicture)
     drawThumbnail(kGlider, {}, {.width = 3, .height = 3}, {.width = 0, .height = 10}, kStyle,
                   picture);
     EXPECT_EQ(picture.size(), (PixelSize{0, 0}));
+}
+
+TEST(ThumbnailTest, APlaneLooksLikeItsCells)
+{
+    // A glider far from the centre: the same picture as the glider's own cells.
+    core::HashLife                 plane(core::Rule{}, std::uint64_t{1} << 26);
+    std::vector<core::UniversePos> cells;
+    cells.reserve(kGlider.size());
+    for (const CellPos cell : kGlider)
+    {
+        cells.push_back({.x = cell.x - 7000, .y = cell.y + 90});
+    }
+    plane.setCells(cells, core::kAlive);
+    PixelBuffer fromPlane;
+    PixelBuffer fromCells;
+    drawThumbnail(plane, plane.bounds().value(), {.width = 30, .height = 20}, kStyle, fromPlane);
+    drawThumbnail(kGlider, {}, {.width = 3, .height = 3}, {.width = 30, .height = 20}, kStyle,
+                  fromCells);
+    EXPECT_EQ(ascii(fromPlane), ascii(fromCells));
+}
+
+TEST(ThumbnailTest, ALargePlaneIsDrawnInBlocks)
+{
+    // Two cells 1000 apart in 10 pixels: blocks of 128 cells, the second cell in the eighth.
+    core::HashLife plane(core::Rule{}, std::uint64_t{1} << 26);
+    plane.setCells(std::vector<core::UniversePos>{{.x = 0, .y = 0}, {.x = 1000, .y = 0}},
+                   core::kAlive);
+    PixelBuffer picture;
+    drawThumbnail(plane, plane.bounds().value(), {.width = 10, .height = 10}, kStyle, picture);
+    EXPECT_EQ(ascii(picture), "O......O\n");
+
+    drawThumbnail(plane, {}, {.width = 10, .height = 10}, kStyle, picture);
+    EXPECT_EQ(picture.size(), (PixelSize{}));
 }
 
 }  // namespace

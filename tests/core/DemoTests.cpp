@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <map>
 #include <optional>
 #include <set>
 #include <span>
@@ -16,6 +17,8 @@
 
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/EmbeddedFile.h"
+#include "wxLife/core/HashLife.h"
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Pattern.h"
 #include "wxLife/core/PatternSetup.h"
 #include "wxLife/core/Rule.h"
@@ -31,10 +34,24 @@ namespace
 
 constexpr std::uint64_t kMiB = std::uint64_t{1} << 20;
 
-bool inside(CellRect rect, Extent world)
+bool inside(UniverseRect rect, Extent world)
 {
     return !rect.empty() && rect.x0 >= 0 && rect.y0 >= 0 && rect.x1 <= world.width &&
            rect.y1 <= world.height;
+}
+
+bool overlap(UniverseRect a, UniverseRect b)
+{
+    return a.x0 < b.x1 && b.x0 < a.x1 && a.y0 < b.y1 && b.y0 < a.y1;
+}
+
+// The demo's pattern, read once: the giant ones take a while in a debug build.
+const Pattern& patternOf(const Demo& demo)
+{
+    static std::map<std::string_view, Pattern> s_read;
+    const auto                                 found = s_read.find(demo.name);
+    return found != s_read.end() ? found->second
+                                 : s_read.emplace(demo.name, demoPattern(demo)).first->second;
 }
 
 const Demo& demoNamed(std::string_view name)
@@ -68,30 +85,57 @@ TEST(DemoTest, EveryDemoReadsAndFitsItsWorld)
         EXPECT_FALSE(demo.name.empty());
         EXPECT_FALSE(demo.about.empty());
         EXPECT_EQ(demo.speed, demo.speed.clamped());
-        // Every world is possible on some computer: the budget only greys out the largest.
-        EXPECT_TRUE(validateExtent(demo.world, std::uint64_t{1} << 40));
+
+        const bool unbounded = demo.kind == WorldKind::UNBOUNDED;
+        if (unbounded)
+        {
+            EXPECT_EQ(demo.world, (Extent{})) << "a plane has no size";
+            EXPECT_LE(demo.stepExponent, 40U) << "the largest step the UI offers is 2^40";
+            EXPECT_EQ(demo.automaton, Automaton::LIFE);
+        }
+        else
+        {
+            // Every world is possible on some computer: the budget only greys out the largest.
+            EXPECT_TRUE(validateExtent(demo.world, std::uint64_t{1} << 40));
+            EXPECT_EQ(demo.stepExponent, 0U);
+            EXPECT_EQ(demo.memoryNeeded, 0U);
+        }
 
         Pattern pattern;
         if (!demo.file.empty())
         {
             const std::optional<std::string_view> text = embeddedPatternText(demo.file);
             ASSERT_TRUE(text.has_value()) << demo.file << " is not embedded";
-            const std::expected<Pattern, PatternError> read = readPattern(*text);
-            ASSERT_TRUE(read.has_value()) << describe(read.error());
-            pattern = *read;
-            EXPECT_FALSE(pattern.cells.empty());
+            const std::expected<Pattern, std::string> read = readPatternData(*text);
+            ASSERT_TRUE(read.has_value()) << read.error();
+            pattern = patternOf(demo);
+            if (pattern.tree)
+            {
+                EXPECT_TRUE(unbounded) << "a macrocell needs an unbounded world";
+                EXPECT_GT(pattern.tree->population, 0U);
+            }
+            else
+            {
+                EXPECT_FALSE(pattern.cells.empty());
+            }
             EXPECT_EQ(pattern.rule.value_or(Rule{}), Rule{}) << "every demo runs Conway's Life";
         }
         const PatternSetup setup = demoSetup(demo, pattern);
-        EXPECT_TRUE(inside({.x0 = setup.origin.x,
-                            .y0 = setup.origin.y,
-                            .x1 = setup.origin.x + std::max(pattern.extent.width, 1),
-                            .y1 = setup.origin.y + std::max(pattern.extent.height, 1)},
-                           demo.world))
-            << "the pattern does not fit its world";
+        const UniverseRect placed =
+            pattern.tree ? pattern.tree->bounds
+                         : UniverseRect{.x0 = setup.origin.x,
+                                        .y0 = setup.origin.y,
+                                        .x1 = setup.origin.x + std::max(pattern.extent.width, 1),
+                                        .y1 = setup.origin.y + std::max(pattern.extent.height, 1)};
+        if (!unbounded)
+        {
+            EXPECT_TRUE(inside(placed, demo.world)) << "the pattern does not fit its world";
+        }
         if (setup.view)
         {
-            EXPECT_TRUE(inside(setup.view.value(), demo.world)) << "the view leaves the world";
+            EXPECT_TRUE(unbounded ? overlap(setup.view.value(), placed)
+                                  : inside(setup.view.value(), demo.world))
+                << "the view shows nothing of the pattern, or leaves the world";
         }
 
         const bool ants = demo.automaton == Automaton::LANGTON_ANT;
@@ -102,7 +146,10 @@ TEST(DemoTest, EveryDemoReadsAndFitsItsWorld)
             EXPECT_TRUE(demo.world.contains(ant.position));
         }
         // What demoPattern() gives the program is what the file says.
-        EXPECT_EQ(demoPattern(demo).cells, pattern.cells);
+        if (!demo.file.empty())
+        {
+            EXPECT_EQ(pattern.cells, readPatternData(*embeddedPatternText(demo.file))->cells);
+        }
     }
 }
 
@@ -150,12 +197,15 @@ TEST(DemoTest, DemosFitAComputerWithTwoGigabytes)
 
 TEST(DemoTest, DemoSetupPlacesThePatternAndTheView)
 {
+    // The Primer runs on a plane, centred on (0, 0).
     const Demo&        primer  = demoNamed("Primer");
     const Pattern      pattern = demoPattern(primer);
     const PatternSetup setup   = demoSetup(primer, pattern);
-    EXPECT_EQ(setup.world, primer.world);
-    EXPECT_EQ(setup.origin, primer.origin.value());
+    EXPECT_EQ(setup.kind, WorldKind::UNBOUNDED);
+    EXPECT_EQ(setup.origin,
+              (CellPos{.x = -(pattern.extent.width / 2), .y = -(pattern.extent.height / 2)}));
     EXPECT_EQ(setup.speed, primer.speed);
+    EXPECT_EQ(setup.stepExponent, primer.stepExponent);
     EXPECT_EQ(setup.automaton, Automaton::LIFE);
     EXPECT_TRUE(setup.ants.empty());
     // The view is given relative to the pattern and set up in world cells.
@@ -252,6 +302,70 @@ TEST(DemoTest, TheErasingAntsEmptyTheWorldEvery24Generations)
         }
         EXPECT_EQ(world.population(), 0) << "generation " << world.generation();
         EXPECT_EQ(world.cells().countAlive(), 0);
+    }
+}
+
+TEST(DemoTest, TheGiantPatternsAreTheOnesLifeWikiDescribes)
+{
+    // Bounding boxes and populations as LifeWiki gives them, where the file is in the same phase.
+    struct Facts
+    {
+        std::string_view             demo;
+        UniverseCoord                width;
+        UniverseCoord                height;
+        std::optional<std::uint64_t> population;
+    };
+    constexpr UniverseCoord kMetapixelSide = 2048;
+    for (const Facts& facts : {
+             Facts{.demo = "Caterpillar", .width = 4195, .height = 330'721, .population = {}},
+             Facts{
+                 .demo = "Gemini", .width = 4'217'807, .height = 4'220'191, .population = 846'278},
+             Facts{.demo       = "Pi calculator",
+                   .width      = 117'573,
+                   .height     = 155'887,
+                   .population = 1'189'325},
+             Facts{.demo       = "Kok's galaxy in OTCA metapixels",
+                   .width      = 15 * kMetapixelSide,
+                   .height     = 15 * kMetapixelSide,
+                   .population = {}},
+             Facts{.demo       = "Spartan universal computer-constructor",
+                   .width      = 84'625,
+                   .height     = 73'461,
+                   .population = {}},
+         })
+    {
+        SCOPED_TRACE(facts.demo);
+        const Pattern& pattern = patternOf(demoNamed(facts.demo));
+        ASSERT_TRUE(pattern.tree.has_value());
+        const Macrocell&   tree   = pattern.tree.value();
+        const UniverseRect bounds = tree.bounds;
+        EXPECT_EQ(bounds.x1 - bounds.x0, facts.width);
+        EXPECT_EQ(bounds.y1 - bounds.y0, facts.height);
+        if (facts.population)
+        {
+            EXPECT_EQ(tree.population, facts.population.value());
+        }
+    }
+    EXPECT_EQ(patternOf(demoNamed("Centipede")).tree.value().population, 620'901U);
+}
+
+TEST(DemoTest, EveryMacrocellBecomesTheSamePlane)
+{
+    // What the reader works out from the file, the plane holds once it is built.
+    for (const Demo& demo : demos())
+    {
+        const Pattern& pattern = patternOf(demo);
+        if (!pattern.tree)
+        {
+            continue;
+        }
+        SCOPED_TRACE(demo.name);
+        const Macrocell& tree = pattern.tree.value();
+        HashLife         plane(pattern.rule.value_or(Rule{}), std::uint64_t{1} << 30);
+        plane.load(tree);
+        EXPECT_EQ(plane.population(), tree.population);
+        EXPECT_EQ(plane.bounds(), tree.bounds);
+        EXPECT_EQ(plane.generation(), tree.generation);
     }
 }
 

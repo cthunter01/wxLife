@@ -22,6 +22,7 @@
 #include "wxLife/core/Ant.h"
 #include "wxLife/core/Demo.h"
 #include "wxLife/core/Format.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/Pattern.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
@@ -46,6 +47,8 @@ constexpr int kDetailsWidthDip  = 400;
 constexpr int kPreviewHeightDip = 220;
 /// Lines kept free for the longest description, so the dialog does not change size.
 constexpr int kAboutLines = 8;
+/// Enough for the largest demo's own nodes; the preview never steps.
+constexpr std::uint64_t kPreviewMemory = std::uint64_t{256} << 20;
 
 [[nodiscard]] std::string countText(std::int64_t n)
 {
@@ -78,16 +81,30 @@ constexpr int kAboutLines = 8;
         what = std::format("{} ant{} on an empty world", demo.ants.size(),
                            demo.ants.size() == 1 ? "" : "s");
     }
+    else if (pattern.tree)
+    {
+        const core::UniverseRect bounds = pattern.tree->bounds;
+        what = std::format("Pattern: {} × {} cells, {} alive", countText(bounds.x1 - bounds.x0),
+                           countText(bounds.y1 - bounds.y0),
+                           core::formatCount(pattern.tree->population));
+    }
     else
     {
         what = std::format("Pattern: {} cells, {} alive", sizeText(pattern.extent),
                            countText(static_cast<std::int64_t>(pattern.cells.size())));
     }
+    const std::string rule = pattern.rule.value_or(core::Rule{}).toString();
+    if (demo.kind == core::WorldKind::UNBOUNDED)
+    {
+        return what + "\n" +
+               std::format("World: unbounded · {} · {} · steps of 2^{}", rule,
+                           core::toString(demo.speed), demo.stepExponent);
+    }
     std::string world =
         std::format("World: {} · {}", sizeText(demo.world), edgesText(demo.topology));
     if (demo.automaton == core::Automaton::LIFE)
     {
-        world += std::format(" · {}", pattern.rule.value_or(core::Rule{}).toString());
+        world += std::format(" · {}", rule);
     }
     world += std::format(" · {} · {}", core::toString(demo.speed),
                          core::formatBytes(core::worldBytes(demo.world)));
@@ -207,7 +224,9 @@ std::optional<std::size_t> DemoDialog::selectedDemo() const
 
 bool DemoDialog::fits(std::size_t demo) const
 {
-    return core::validateExtent(core::demos()[demo].world, m_budget).has_value();
+    const core::Demo& chosen = core::demos()[demo];
+    return chosen.kind == core::WorldKind::UNBOUNDED ||
+           core::validateExtent(chosen.world, m_budget).has_value();
 }
 
 const core::Pattern& DemoDialog::pattern(std::size_t demo)
@@ -237,13 +256,27 @@ void DemoDialog::showSelection()
     m_facts->SetLabelText(toWx(factsText(demo, pattern)));
     m_about->SetLabelText(toWx(demo.about));
     m_about->Wrap(width);
-    const std::expected<core::Extent, core::ExtentError> valid =
-        core::validateExtent(demo.world, m_budget);
-    m_error->SetLabelText(valid ? wxString()
-                                : toWx("Too large for this computer. " +
-                                       core::describe(valid.error(), demo.world, m_budget)));
+    // A plane's memory grows as it runs, so a demo that needs more than the budget is only warned
+    // about; a fixed-size world that does not fit cannot be loaded at all.
+    std::string problem;
+    if (demo.kind == core::WorldKind::UNBOUNDED)
+    {
+        if (demo.memoryNeeded > m_budget)
+        {
+            problem = std::format(
+                "It needs about {} of memory to run smoothly, and the memory budget is {}: it "
+                "may run slowly or stop.",
+                core::formatBytes(demo.memoryNeeded), core::formatBytes(m_budget));
+        }
+    }
+    else if (const auto valid = core::validateExtent(demo.world, m_budget); !valid)
+    {
+        problem =
+            "Too large for this computer. " + core::describe(valid.error(), demo.world, m_budget);
+    }
+    m_error->SetLabelText(toWx(problem));
     m_error->Wrap(width);
-    m_load->Enable(valid.has_value());
+    m_load->Enable(fits(*selected));
     showPreview(*selected);
     Layout();
 }
@@ -278,8 +311,18 @@ void DemoDialog::showPreview(std::size_t demo)
         area  = selected.world;
     }
     render::PixelBuffer thumbnail;
-    render::drawThumbnail(shown, ants ? selected.ants : std::span<const core::Ant>{}, area, maxSize,
-                          style, thumbnail);
+    if (pattern.tree)
+    {
+        // Far too many cells to list: the plane draws them block by block.
+        core::HashLife plane(pattern.rule.value_or(core::Rule{}), kPreviewMemory);
+        plane.load(*pattern.tree);
+        render::drawThumbnail(plane, pattern.tree->bounds, maxSize, style, thumbnail);
+    }
+    else
+    {
+        render::drawThumbnail(shown, ants ? selected.ants : std::span<const core::Ant>{}, area,
+                              maxSize, style, thumbnail);
+    }
 
     // The thumbnail, centred on a box of the colour beyond a world's edge.
     wxImage image(static_cast<int>(maxSize.width), static_cast<int>(maxSize.height));

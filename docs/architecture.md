@@ -26,8 +26,9 @@ All numbers below were measured on the development machine unless marked otherwi
 |          Thumbnail                                                       |
 | core/    Types, Line, Rule, Ant, Grid, Random, ParallelBands, Stepper,   |
 |          ReferenceStepper, StepKernel, BandedStepper, World, HashLife,   |
-|          WorldLimits, Speed, Pacer, Format, Pattern, PatternSetup,       |
-|          Demo, EmbeddedFile (+ the generated EmbeddedPatterns.cpp)       |
+|          WorldLimits, Speed, Pacer, Format, Gzip, Macrocell, Pattern,    |
+|          PatternSetup, Demo, EmbeddedFile (+ the generated               |
+|          EmbeddedPatterns.cpp)                                           |
 |                                             lib wxLife_lib (+ Threads)  |
 +--------------------------------------------------------------------------+
 src/Main.cpp:  exe wxLife -> wxLife_ui
@@ -253,7 +254,9 @@ reading threads, and the `tsan` preset checks that under ThreadSanitizer.
 **Editing and reading.** `setCells()` builds a quadtree of the new cells and unites it with the
 plane (or subtracts it, to erase). `forEachBlock()` visits the 2^s × 2^s blocks that hold a live cell
 in a rectangle, skipping empty nodes, so a renderer showing 2^s cells per pixel costs one call per lit
-pixel. `bounds()` finds the extreme live cells, remembering each shared node's answer.
+pixel. `bounds()` finds the extreme live cells, remembering each shared node's answer. `load()` takes
+a macrocell quadtree (below) and builds it node for node with `join()`, so a file's shared nodes stay
+shared: the Caterpillar's 12 million cells come in as 343,000 nodes in 70 ms (Release).
 
 **What it buys.** On this machine (Release), the Primer reaches generation 1,245,184 in 3.7 s. Its
 1,272 output spaceships are then exactly the primes up to 10,369, where a bounded world goes wrong
@@ -323,39 +326,66 @@ skipped by the quadtree, at any scale.
 **Pattern files.** `readPattern()` (`wxLife/core/Pattern.h`) reads RLE and plaintext (`.cells`) text into
 a `Pattern`: the live cells relative to the pattern's top-left corner, its extent, rule, name, author and
 comments. It recognises the format from the first line that is not blank, and it refuses what it cannot
-run with a `PatternError` that names the line: macrocell and Life 1.0x files, multi-state cells, rules
-that are not two-state B/S rules, and patterns wider or taller than `kMaxWorldSide`. A header that
-declares such a size is refused before a single cell is read, so the 30 MB Caterpillar file fails at
-its second line. `core` reads no files; `MainFrame` reads the bytes with `wxFFile` and hands them over.
+run with a `PatternError` that names the line: Life 1.0x files, multi-state cells, rules that are not
+two-state B/S rules, and patterns wider or taller than `kMaxWorldSide`. A header that declares such a
+size is refused before a single cell is read, so the 30 MB RLE of the Caterpillar fails at its second
+line. `core` reads no files; `MainFrame` reads the bytes with `wxFFile` and hands them over.
 
-**The embedded files.** The demos' RLE files live in `patterns/`, listed in `src/CMakeLists.txt`.
+**Macrocell files** (`.mc`, Golly's format for HashLife) are read into `Pattern::tree`, a `Macrocell`
+(`wxLife/core/Macrocell.h`) instead of cells: every node of the file, an 8 × 8 leaf or four children
+one level down, children first and the root last, centred on (0, 0). The reader checks every node as it
+comes (characters, leaf size, children that come earlier and are one level down, the universe's 62
+levels) and works out, bottom-up, each node's population and bounding box, so the pattern's bounds
+cost one pass over the nodes, however many cells they hold. Only an unbounded world can take a tree:
+`World::loadMacrocell()` builds a new HashLife with `HashLife::load()` and swaps it in (the strong
+guarantee), and `fileSetup()` always gives a tree a plane.
+
+**Gzip.** Golly distributes large patterns compressed (`.mc.gz`), and the giant demos are stored so.
+`readPatternData()` unpacks data that starts with gzip's magic bytes before reading it. The decoder,
+`gunzip()` (`wxLife/core/Gzip.h`), is wxLife's own, about 400 lines for RFC 1951 and 1952: linking zlib
+would have meant a second copy next to the one wxWidgets builds on Windows, and none at all in the
+`headless` preset. Huffman codes are decoded with one table lookup per symbol from a 64-bit bit buffer,
+about 170 MB/s (Release); every member is checked against its CRC-32 and length, and the output may
+not exceed `kMaxPatternBytes` (256 MB), so a damaged or hostile file cannot run away.
+
+**The embedded files.** The demos' files live in `patterns/`, listed in `src/CMakeLists.txt`.
 `cmake/EmbedPatterns.cmake` turns them into one generated source of `char` arrays (string literals would
 hit MSVC's 64 KiB limit) behind `embeddedPatternFiles()` (`wxLife/core/EmbeddedFile.h`). The program
-therefore needs no data files, and no platform-specific way to find them. The generated source is
-rewritten only when a pattern changes, and clang-tidy skips it (`SKIP_LINTING`).
+therefore needs no data files, and no platform-specific way to find them. Text files must be ASCII; the
+`.gz` files' bytes from 0x80 up become character literals (`'\x8b'`), valid whether `char` is signed or
+not. The 4.6 MB of compressed patterns make a 32 MB source, which Clang compiles in a few seconds. The
+generated source is rewritten only when a pattern changes, and clang-tidy skips it (`SKIP_LINTING`).
 
 **The catalogue.** `demos()` (`wxLife/core/Demo.h`) is a table of `Demo`s: name, category, credit,
-description, file, and the world the demo runs in, which is its size, topology, where the pattern goes,
-speed, the part of the world to show first, and for the ant demos the automaton and the ants. Every
-setting was chosen by running the demo headlessly:
+description, file, and the world the demo runs in: a fixed-size world with its size and topology, or an
+unbounded plane with a step size (`stepExponent`) and the memory it needs to run smoothly
+(`memoryNeeded`); where the pattern goes, the speed, the part of the world to show first, and for the
+ant demos the automaton and the ants. Every setting was chosen by running the demo headlessly:
 - A glider that reaches a dead edge vanishes cleanly, so the guns fire forever in bounded worlds.
 - The methuselahs' worlds are large enough that their evolution, apart from the escaping gliders, is
   cell for cell the same as on an unbounded plane.
-- The prime calculators throw streams of spaceships up and to the right. An unbounded plane swallows
-  them; a bounded or wrapping world sends wreckage back, which reaches the machine after roughly four
-  times the distance to the edges in generations. Their worlds are as large as a quick load allows, and
-  their descriptions say how many primes come out right, as measured.
+- The prime calculators throw streams of spaceships up and to the right. In a fixed-size world the
+  wreckage came back after 8,000 to 14,000 generations, so they run on planes, which swallow it.
+- The giant patterns were run with a 4 GiB budget, a 16 GB computer's. HashLife is slow on a pattern
+  while it learns it and fast once it has: the Caterpillar's first step of 2^10 generations took 12 s,
+  its hundredth 4 ms, and its memory settled at 2 GB. Their step sizes make them move visibly without
+  long waits: 2^10 for the caterpillars, 2^16 for the Demonoid (its period is 2^21) and Gemini, 2^30
+  for the pi calculator, which prints a digit every few tens of billions of generations. The
+  Orthogonoid was left out: its period is no power of two, and a step of 2^20 took minutes and 15 GB.
 
 `DemoTest` checks the table against the files, and pins a few descriptions to the real patterns: the
-Gosper gun's period, the Primer's first primes and the ant demos' promises.
+Gosper gun's period, the Primer's first primes, the ant demos' promises, and the giant patterns'
+bounding boxes and populations as LifeWiki gives them.
 
 **Loading.** `PatternSetup` (`wxLife/core/PatternSetup.h`) is everything a load changes. `demoSetup()`
 makes it from a `Demo`; `fileSetup()` makes it for a file: the pattern in the middle of a world with
 half its size of room on each side (at least `kMinFileMargin`), halving the room until the world fits the
 memory budget. `MainFrame::loadPattern()` then applies it in one place: stop the runner, resize or clear
 the world and call `worldExtentChanged()` at once (as a resize does), set the topology, the rule, the
-ants and the automaton, set the cells with `World::setCells(cells, kAlive, origin)`, set the speed, and
-show `setup.view` with `WorldCanvas::showCells()`. The world waits at generation 0.
+ants and the automaton, set the cells with `World::setCells(cells, kAlive, origin)` (or, for a tree,
+`World::loadMacrocell()`), set the speed and the step size, and show `setup.view` with
+`WorldCanvas::showCells()`. The world waits at generation 0, or at the generation a macrocell file
+gives.
 
 **The view.** `Viewport::fitCells()` is `fitWorld()` for part of the world: the largest cell size that
 shows the cells, centred on them as far as clamping allows. `WorldCanvas` keeps whatever it last fitted
@@ -364,9 +394,12 @@ world, so a demo's view survives the window settling into its size.
 
 **The dialog.** `DemoDialog` lists the categories and demos in a `wxTreeCtrl`. For the selected demo it
 shows the credit, a preview drawn by `render::drawThumbnail()`, the pattern's size, the world and the
-description. A demo over the memory budget is listed, but Load is disabled and the dialog says why;
-`Validate()` refuses Enter too, as `WorldSizeDialog` does. Patterns are read when first shown and kept
-for the dialog's lifetime.
+description. A tree's preview comes from a HashLife built for the moment: `drawThumbnail()` asks it
+for blocks of 2^k cells, the first size that fits, so the preview of 12 million cells costs a few
+thousand visits. A fixed-size demo over the memory budget is listed, but Load is disabled and the
+dialog says why; `Validate()` refuses Enter too, as `WorldSizeDialog` does. A plane's memory grows as
+it runs, so a demo whose `memoryNeeded` exceeds the budget only gets a warning. Patterns are read when
+first shown and kept for the dialog's lifetime.
 
 ## Rendering and the camera (`render`, `WorldCanvas`)
 
@@ -684,9 +717,14 @@ checks whether that step has finished (see Unbounded worlds above).
   at scales from 1/8 to 16 px.
 - **`PatternTest`** reads RLE and plaintext text, including the tolerances real files need (CRLF, runs
   split by white space and line ends, a missing `!`, every rule spelling), and every error with its line.
-  **`PatternSetupTest`** covers the demo and file setups, including the margins shrinking to the budget.
-  **`DemoTest`** checks every demo against its embedded file and world, and runs the Gosper gun, the
-  first primes of the Primer and the ant demos. **`ThumbnailTest`** compares previews with text art.
+  Macrocells are checked for their cells, bounds, shared nodes and every broken node, up to a population
+  too large to count. **`GzipTest`** unpacks stored, fixed and dynamic blocks, overlapping copies, every
+  optional header field and several members, all made with Python's zlib, and refuses damaged, cut and
+  oversized data. **`PatternSetupTest`** covers the demo and file setups, including the margins
+  shrinking to the budget and trees on planes. **`DemoTest`** checks every demo against its embedded
+  file and world, runs the Gosper gun, the first primes of the Primer and the ant demos, and compares
+  every tree with the plane HashLife builds from it. **`ThumbnailTest`** compares previews with text
+  art, a plane's among them.
 - **`ViewportTest`** checks anchored zoom for every pair of zoom steps and every anchor position inside
   a cell against a floating-point reference, checks that zooming there and back restores the offset,
   below 1 px and across it too, and compares `cellAt` and `visibleCells` with brute-force results, below
@@ -727,11 +765,10 @@ checks whether that step has finished (see Unbounded worlds above).
 | Other rule families (Generations, Larger than Life) | Only the steppers interpret a `Rule`; the rest of the code only parses, prints and compares it. `Cell` is a byte. | Make `Rule` a `std::variant` and give each family its own stepper, plus a case in `Rule::toString()`, `findPreset()` and the preset list. The rasterizer would need colours for the extra states. |
 | More automata (other turmites, multi-state ants) | `Automaton`, `kAutomata` and the `default`-less switch in `World::step()`; `wxLife/core/Ant.h` holds the ant's own rule | Add an enum value and a `kAutomata` entry; `-Wswitch` then points at the four switches that need a case: `toString(Automaton)`, `World::step()`, and `worldText()` and `automatonMenuItem()` in `src/ui/MainFrame.cpp`. The panel's choice is built from `kAutomata`, so it needs no change. Multi-state cells would additionally break the binary assumptions listed in the row above. With a third automaton it is time to extract an interface from `World` instead of widening the switch. |
 | Other topologies (cylinder, Klein bottle) | `Topology` and `kTopologies`. `-Wswitch` lists the `core` code that needs a case: `toString(Topology)`, `Grid::updateBorder()` and the `alive` lambda in `ReferenceStepper::step()`. | Add an enum value, a `kTopologies` entry and a copy rule; `StepperTest` and `WorldTest` then cover it. The Wrap Edges toggle in `MainFrame` would become a choice. |
-| Macrocell files, giant demos | Unbounded worlds; `readPattern()`; `PatternSetup::kind` | A macrocell reader that builds HashLife nodes directly, and demos with `kind = UNBOUNDED`. That brings the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and lets the prime calculators run without their streams hitting an edge. |
 | A third kind of world, or HashLife for more automata | `WorldKind`, the `kind()` branches in `World`, `WorldCanvas` and `MainFrame` | With a third kind it is time to extract an interface from `World` with one implementation per kind, rather than more branches. |
 | A minimap | `Viewport` and `Rasterizer` draw any part of any world at any scale, down to all of it (`maxShrink()`) | A second small canvas with its own `Viewport` at `maxShrink()`, drawing the main view's `visibleCells()` as a frame over it, and turning clicks into `centerOn()`. |
 | More demos | `patterns/`, `demo_patterns` in `src/CMakeLists.txt`, `kDemos` in `src/core/Demo.cpp` | Add the file, list it, and add a `Demo`; `DemoTest` checks the rest. `patterns/README.md` has the steps. |
-| Saving patterns, more file formats | `readPattern()`, `MainFrame::openPatternFile()` | An RLE writer next to the reader and File → Save. Life 1.06 would be a third reader behind the same format check. |
+| Saving patterns, more file formats | `readPattern()`, `readPatternData()`, `MainFrame::openPatternFile()` | An RLE writer next to the reader and File → Save; a macrocell writer would walk HashLife's nodes and number them children first, as `Macrocell` expects. Life 1.06 would be one more reader behind the same format check. |
 | Undo/redo, selection | Every edit enters through a `CommandId` or through `paintCells` → `MainFrame::onPaintCells()` | Let `World::setCells()` report the changed cells, and add an undo stack in `ui/`. |
 | Themes, saved settings | `RenderStyle`, `darkStyle()`/`lightStyle()`, `ui::defaults` and `Speed` are plain values. Only `wxLife/ui/Theme.h` (`themeStyle()`, `useErrorColour()`) picks colours from the desktop theme. | Load and save them with `wxConfig` in `LifeApp`. A user theme would replace the choice in `wxLife/ui/Theme.h`. |
 | Parallel rasterizer, OpenGL canvas | `Rasterizer::render()` (pixel rows are independent); `WorldCanvas::onPaint()` is the only blit | Use `forEachBand()` over pixel rows, or add a `wxGLCanvas` variant (turn `wxUSE_OPENGL` back on). |
@@ -755,7 +792,8 @@ Headers are in `include/wxLife/`, sources in `src/`.
 11. `ui/SimulationRunner.cpp`: the one-shot timer, and the worker thread that steps planes.
 12. `ui/WorldCanvas.cpp`: painting, scrollbars, mouse and keys.
 13. `ui/MainFrame.cpp`: the command table, syncing the controls, and the status bar.
-14. `core/Pattern.cpp`, `core/Demo.cpp`, `core/PatternSetup.cpp`: reading pattern files, the demo
-    catalogue, and what loading one does; then `MainFrame::loadPattern()`.
+14. `core/Pattern.cpp`, `core/Demo.cpp`, `core/PatternSetup.cpp`: reading pattern files, macrocells
+    among them, the demo catalogue, and what loading one does; then `MainFrame::loadPattern()`.
+    `core/Gzip.cpp` is DEFLATE decoding on its own, for the curious.
 15. `core/HashLife.h`, `core/HashLife.cpp`: the quadtree, `successor()`, and the rules that let one
     thread step while others draw.

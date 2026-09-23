@@ -5,6 +5,7 @@
 #include <span>
 
 #include "wxLife/core/Ant.h"
+#include "wxLife/core/HashLife.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/render/PixelBuffer.h"
 #include "wxLife/render/RenderStyle.h"
@@ -31,5 +32,11 @@ inline constexpr int kMinThumbnailAntSize = 3;
 void drawThumbnail(std::span<const core::CellPos> cells, std::span<const core::Ant> ants,
                    core::Extent extent, PixelSize maxSize, const RenderStyle& style,
                    PixelBuffer& out);
+
+/// The same for the cells of `area` on an unbounded plane, which may be far larger than any
+/// list of cells could be: the plane gives its blocks of 2^k × 2^k cells, for the smallest k whose
+/// blocks fit `maxSize`, and each block is drawn as a cell above.
+void drawThumbnail(const core::HashLife& plane, core::UniverseRect area, PixelSize maxSize,
+                   const RenderStyle& style, PixelBuffer& out);
 
 }  // namespace wxLife::render

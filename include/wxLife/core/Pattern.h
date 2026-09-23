@@ -1,7 +1,9 @@
 /// @file
-/// Pattern files: RLE and plaintext (.cells), read into a list of live cells.
+/// Pattern files: RLE and plaintext (.cells), read into a list of live cells, and macrocell (.mc),
+/// read into a quadtree.
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <optional>
@@ -9,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 
@@ -16,7 +19,7 @@ namespace wxLife::core
 {
 
 /// A pattern read from a file: its live cells, relative to the top-left corner of its bounding box,
-/// and what the file says about it.
+/// or its quadtree, and what the file says about it.
 struct Pattern
 {
     std::string              name;      ///< RLE "#N", plaintext "!Name:"; may be empty.
@@ -28,6 +31,9 @@ struct Pattern
     Extent extent;
     /// Live cells inside `extent`, row by row from the top, each row from the left.
     std::vector<CellPos> cells;
+    /// A macrocell file's quadtree, which only an unbounded world can take. Its cells stay where
+    /// the file puts them; `extent` and `cells` are then empty.
+    std::optional<Macrocell> tree;
 };
 
 /// Why readPattern() rejected a text.
@@ -42,6 +48,7 @@ enum class PatternErrorKind : std::uint8_t
     MULTI_STATE,         ///< RLE cells of a third state.
     BAD_CHARACTER,       ///< `detail` quotes it.
     TOO_LARGE,           ///< Wider or taller than kMaxWorldSide.
+    BAD_NODE,            ///< A macrocell node that cannot be read; `detail` says why.
 };
 
 /// What readPattern() could not read, and where.
@@ -57,15 +64,28 @@ struct PatternError
 /// Message for the user, e.g. "Line 4: Unexpected character '%'."
 [[nodiscard]] std::string describe(const PatternError& error);
 
-/// Reads an RLE or plaintext (.cells) pattern, recognising the format from the text.
+/// Reads an RLE, plaintext (.cells) or macrocell (.mc) pattern, recognising the format from the
+/// text.
 /// - RLE: `#N`, `#O`, `#C`/`#c` and `#r` lines, the `x = …, y = …, rule = …` header, then runs of
 ///   `b`/`.` (dead), `o`/`A` (alive) and `$` (end of row) up to `!`. White space may appear between
 ///   runs, and text after `!` is ignored.
 /// - Plaintext: `!` comment lines (`!Name:` and `!Author:` fill in those fields), then one line per
 ///   row of `.` (dead) and `O` or `*` (alive).
 ///
-/// Both accept LF and CRLF line ends. A rule is a B/S rule in any form Rule::parse() takes, or
+/// - Macrocell: the `[M2]` line, `#R` (rule), `#G` (generation) and `#C` lines, then one line per
+///   node: an 8 × 8 leaf as rows of `.` and `*`, each ended by `$`, or "level nw ne sw se", where
+///   each child is the number of an earlier line of nodes, counted from 1, or 0 for empty space.
+///   Golly's multi-state macrocells, with nodes of level 1, are refused.
+///
+/// All accept LF and CRLF line ends. A rule is a B/S rule in any form Rule::parse() takes, or
 /// "Life"; Golly's bounded-grid suffix (":T100,100") is ignored.
 [[nodiscard]] std::expected<Pattern, PatternError> readPattern(std::string_view text);
+
+/// The most a pattern file may hold, packed or unpacked; no pattern wxLife can run comes near it.
+inline constexpr std::size_t kMaxPatternBytes = std::size_t{256} << 20;
+
+/// readPattern() for the contents of a file, which may be gzip-compressed, as Golly's .mc.gz and
+/// .rle.gz files are. @return the pattern, or a message for the user saying why not.
+[[nodiscard]] std::expected<Pattern, std::string> readPatternData(std::string_view contents);
 
 }  // namespace wxLife::core

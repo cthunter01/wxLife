@@ -135,8 +135,8 @@ using StatusBar = wxStatusBar;
     return std::format("{} × {}", countText(extent.width), countText(extent.height));
 }
 
-/// Pattern files larger than this are not read: no pattern that fits a world is anywhere near it.
-constexpr std::uint64_t kMaxPatternFileBytes = std::uint64_t{256} << 20;
+/// Pattern files larger than this are not read.
+constexpr std::uint64_t kMaxPatternFileBytes = core::kMaxPatternBytes;
 
 // Randomize on an unbounded plane fills at most this many cells along each side of the view.
 constexpr core::UniverseCoord kMaxRandomSide = 4096;
@@ -400,7 +400,8 @@ void MainFrame::onOpenPattern()
     m_canvas->cancelStroke();
 
     wxFileDialog dialog(this, "Open Pattern", m_lastPatternDir, wxString(),
-                        "Pattern files (*.rle;*.cells)|*.rle;*.cells|All files|*",
+                        "Pattern files (*.rle;*.cells;*.mc;*.gz)|*.rle;*.cells;*.mc;*.gz|All "
+                        "files|*",
                         wxFD_OPEN | wxFD_FILE_MUST_EXIST);
     if (dialog.ShowModal() == wxID_OK && openPatternFile(dialog.GetPath()))
     {
@@ -419,11 +420,9 @@ bool MainFrame::openPatternFile(const wxString& path)
 {
     m_lastPatternDir                                   = wxFileName(path).GetPath();
     const std::expected<std::string, std::string> text = readPatternFile(path);
-    const auto pattern = text.and_then([](const std::string& contents) {
-        return core::readPattern(contents).transform_error(
-            [](const core::PatternError& error) { return core::describe(error); });
-    });
-    const auto setup   = pattern.and_then([this](const core::Pattern& read) {
+    const auto                                    pattern =
+        text.and_then([](const std::string& contents) { return core::readPatternData(contents); });
+    const auto setup = pattern.and_then([this](const core::Pattern& read) {
         return core::fileSetup(read, m_world.rule(), m_world.kind(), m_world.topology(),
                                m_memoryBudget)
             .transform_error([&](core::ExtentError error) {
@@ -815,7 +814,14 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
             // A plane runs Life with a rule it supports (the caller checked), so both come first.
             m_world.setAutomaton(core::Automaton::LIFE);
             m_world.setRule(setup.rule);
-            m_world.makeUnbounded(false, m_memoryBudget);
+            if (pattern.tree)
+            {
+                m_world.loadMacrocell(*pattern.tree, m_memoryBudget);
+            }
+            else
+            {
+                m_world.makeUnbounded(false, m_memoryBudget);
+            }
         }
         else if (m_world.kind() == core::WorldKind::FIXED_SIZE && setup.world == m_world.extent())
         {
@@ -832,8 +838,8 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
         // World::resize() and makeUnbounded() have the strong guarantee: the old world is intact.
         const std::string message =
             unbounded ? std::string(
-                            "There is not enough memory for an unbounded world. The "
-                            "current world was kept.")
+                            "There is not enough memory for an unbounded world with this "
+                            "pattern. The current world was kept.")
                       : std::format(
                             "There is not enough memory for a {} world. The current "
                             "world was kept.",
@@ -864,6 +870,10 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
     {
         m_runner.setSpeed(*setup.speed);
     }
+    if (setup.stepExponent)
+    {
+        m_runner.setStepExponent(*setup.stepExponent);
+    }
     if (m_world.kind() == core::WorldKind::FIXED_SIZE &&
         m_world.stepper().kind() == core::StepperKind::REFERENCE &&
         m_world.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
@@ -872,10 +882,7 @@ void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSet
     }
     if (setup.view)
     {
-        m_canvas->showCells({.x0 = setup.view->x0,
-                             .y0 = setup.view->y0,
-                             .x1 = setup.view->x1,
-                             .y1 = setup.view->y1});
+        m_canvas->showCells(*setup.view);
     }
     else if (unbounded)
     {

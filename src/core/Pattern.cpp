@@ -1,11 +1,14 @@
 #include "wxLife/core/Pattern.h"
 
 #include <algorithm>
+#include <array>
+#include <bit>
 #include <charconv>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <optional>
 #include <string>
@@ -15,6 +18,8 @@
 #include <vector>
 
 #include "wxLife/core/Format.h"
+#include "wxLife/core/Gzip.h"
+#include "wxLife/core/Macrocell.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Types.h"
 #include "wxLife/core/WorldLimits.h"
@@ -506,6 +511,280 @@ void readPlaintextComment(std::string_view text, Pattern& pattern)
     return pattern;
 }
 
+// The deepest macrocell root the universe holds: 2^62 cells across (kUniverseRadius).
+constexpr unsigned kMaxMacrocellLevel = 62;
+static_assert(UniverseCoord{1} << (kMaxMacrocellLevel - 1) == kUniverseRadius);
+constexpr unsigned kLeafLevel = 3;
+constexpr int      kLeafSide  = 8;
+// More would overflow the counts; no pattern comes near it.
+constexpr std::uint64_t kMaxMacrocellPopulation = std::uint64_t{1} << 62;
+
+// A macrocell node's live cells: how many, and where, relative to its top-left corner.
+struct NodeFacts
+{
+    std::uint64_t population = 0;
+    UniverseRect  box;  ///< Meaningless when population is 0.
+};
+
+[[nodiscard]] NodeFacts leafFacts(std::uint64_t leaf) noexcept
+{
+    NodeFacts facts{.population = static_cast<std::uint64_t>(std::popcount(leaf)),
+                    .box        = {.x0 = kLeafSide, .y0 = kLeafSide, .x1 = 0, .y1 = 0}};
+    for (int bit = 0; bit < kLeafSide * kLeafSide; ++bit)
+    {
+        if (((leaf >> bit) & 1U) != 0)
+        {
+            const int x = bit % kLeafSide;
+            const int y = bit / kLeafSide;
+            facts.box   = {.x0 = std::min<UniverseCoord>(facts.box.x0, x),
+                           .y0 = std::min<UniverseCoord>(facts.box.y0, y),
+                           .x1 = std::max<UniverseCoord>(facts.box.x1, x + 1),
+                           .y1 = std::max<UniverseCoord>(facts.box.y1, y + 1)};
+        }
+    }
+    return facts;
+}
+
+// A leaf line: rows of '.' and '*', each ended by '$'.
+[[nodiscard]] std::expected<std::uint64_t, PatternError> readLeaf(std::string_view text, int line)
+{
+    std::uint64_t leaf = 0;
+    int           x    = 0;
+    int           y    = 0;
+    for (const char c : text)
+    {
+        if (c == '$')
+        {
+            ++y;
+            x = 0;
+            continue;
+        }
+        if (c != '.' && c != '*')
+        {
+            return fail(PatternErrorKind::BAD_CHARACTER, line, quoteCharacter(c));
+        }
+        if (x >= kLeafSide || y >= kLeafSide)
+        {
+            return fail(PatternErrorKind::BAD_NODE, line,
+                        "A leaf is wider or taller than 8 cells.");
+        }
+        if (c == '*')
+        {
+            leaf |= std::uint64_t{1} << ((y * kLeafSide) + x);
+        }
+        ++x;
+    }
+    return leaf;
+}
+
+// A node line, "level nw ne sw se", given the nodes before it.
+[[nodiscard]] std::expected<MacrocellNode, PatternError> readNode(
+    std::string_view text, int line, const std::vector<MacrocellNode>& before)
+{
+    std::array<std::uint64_t, 5> numbers{};
+    std::size_t                  count = 0;
+    for (std::string_view rest = text; !rest.empty(); rest = trim(rest))
+    {
+        std::uint64_t     value = 0;
+        const char* const first = std::to_address(rest.begin());
+        const char* const last  = std::to_address(rest.end());
+        const auto [end, error] = std::from_chars(first, last, value);
+        const auto used         = static_cast<std::size_t>(std::distance(first, end));
+        if (error != std::errc{} || count == numbers.size() ||
+            (used < rest.size() && !kSpace.contains(rest[used])))
+        {
+            return fail(PatternErrorKind::BAD_NODE, line,
+                        std::format("Cannot read the node \"{}\".", text));
+        }
+        numbers.at(count++) = value;
+        rest.remove_prefix(used);
+    }
+    if (count != numbers.size())
+    {
+        return fail(PatternErrorKind::BAD_NODE, line,
+                    std::format("Cannot read the node \"{}\".", text));
+    }
+    const std::uint64_t level = numbers[0];
+    if (level == 1)
+    {
+        return fail(PatternErrorKind::UNSUPPORTED_FORMAT, 0, "multi-state macrocell");
+    }
+    if (level <= kLeafLevel)
+    {
+        return fail(PatternErrorKind::BAD_NODE, line,
+                    std::format("A node of level {} would be no larger than a leaf.", level));
+    }
+    if (level > kMaxMacrocellLevel)
+    {
+        return fail(PatternErrorKind::BAD_NODE, line,
+                    "The pattern is larger than the universe, 2^62 cells across.");
+    }
+    MacrocellNode node{.level = static_cast<std::uint8_t>(level), .leaf = 0, .children = {}};
+    for (std::size_t i = 0; i < node.children.size(); ++i)
+    {
+        const std::uint64_t child = numbers.at(i + 1);
+        if (child > before.size())
+        {
+            return fail(
+                PatternErrorKind::BAD_NODE, line,
+                std::format("A node refers to node {}, which does not come before it.", child));
+        }
+        if (child != 0 && before.at(child - 1).level != level - 1)
+        {
+            return fail(PatternErrorKind::BAD_NODE, line,
+                        std::format("A node of level {} has a child of level {}.", level,
+                                    before.at(child - 1).level));
+        }
+        node.children.at(i) = static_cast<std::uint32_t>(child);
+    }
+    return node;
+}
+
+// The facts of an inner node from its children's.
+[[nodiscard]] std::expected<NodeFacts, PatternError> innerFacts(const MacrocellNode&          node,
+                                                                const std::vector<NodeFacts>& all,
+                                                                int                           line)
+{
+    const UniverseCoord half = UniverseCoord{1} << (node.level - 1);
+    NodeFacts           facts;
+    for (std::size_t i = 0; i < node.children.size(); ++i)
+    {
+        if (node.children.at(i) == 0)
+        {
+            continue;
+        }
+        const NodeFacts& child = all.at(node.children.at(i) - 1);
+        if (child.population == 0)
+        {
+            continue;
+        }
+        if (child.population > kMaxMacrocellPopulation - facts.population)
+        {
+            return fail(PatternErrorKind::BAD_NODE, line, "The pattern has too many live cells.");
+        }
+        const UniverseCoord dx = (i % 2 == 0) ? 0 : half;
+        const UniverseCoord dy = (i < 2) ? 0 : half;
+        const UniverseRect  box{.x0 = child.box.x0 + dx,
+                                .y0 = child.box.y0 + dy,
+                                .x1 = child.box.x1 + dx,
+                                .y1 = child.box.y1 + dy};
+        facts.box = facts.population == 0 ? box
+                                          : UniverseRect{.x0 = std::min(facts.box.x0, box.x0),
+                                                         .y0 = std::min(facts.box.y0, box.y0),
+                                                         .x1 = std::max(facts.box.x1, box.x1),
+                                                         .y1 = std::max(facts.box.y1, box.y1)};
+        facts.population += child.population;
+    }
+    return facts;
+}
+
+// The comment and setting lines of a macrocell file.
+[[nodiscard]] std::expected<void, PatternError> readMacrocellHash(std::string_view text, int line,
+                                                                  Pattern& pattern, Macrocell& tree)
+{
+    const char             kind = text.size() > 1 ? text[1] : ' ';
+    const std::string_view rest = text.size() > 2 ? trim(text.substr(2)) : std::string_view{};
+    switch (kind)
+    {
+        case 'R':
+        {
+            const auto rule = readRule(rest, line);
+            if (!rule)
+            {
+                return std::unexpected(rule.error());
+            }
+            pattern.rule = *rule;
+            break;
+        }
+        case 'G':
+        {
+            const char* const first = std::to_address(rest.begin());
+            const char* const last  = std::to_address(rest.end());
+            const auto [end, error] = std::from_chars(first, last, tree.generation);
+            if (error != std::errc{} || end != last)
+            {
+                return fail(PatternErrorKind::BAD_HEADER, line, std::string(text));
+            }
+            break;
+        }
+        case 'N':
+            pattern.name = rest;
+            break;
+        case 'O':
+            pattern.author = rest;
+            break;
+        case 'C':
+        case 'c':
+            pattern.comments.emplace_back(rest);
+            break;
+        default:  // Golly's others, such as #FRAMES, say nothing about the pattern
+            break;
+    }
+    return {};
+}
+
+[[nodiscard]] std::expected<Pattern, PatternError> readMacrocell(Lines lines)
+{
+    Pattern                pattern;
+    Macrocell              tree;
+    std::vector<NodeFacts> facts;
+    while (const std::optional<std::string_view> line = lines.next())
+    {
+        const std::string_view text   = trim(*line);
+        const int              number = lines.number();
+        if (text.empty() || text.starts_with('['))  // the [M2] line
+        {
+            continue;
+        }
+        if (text.starts_with('#'))
+        {
+            if (auto read = readMacrocellHash(text, number, pattern, tree); !read)
+            {
+                return std::unexpected(read.error());
+            }
+            continue;
+        }
+        if (text.starts_with('.') || text.starts_with('*') || text.starts_with('$'))
+        {
+            const auto leaf = readLeaf(text, number);
+            if (!leaf)
+            {
+                return std::unexpected(leaf.error());
+            }
+            tree.nodes.push_back({.level = kLeafLevel, .leaf = *leaf, .children = {}});
+            facts.push_back(leafFacts(*leaf));
+            continue;
+        }
+        if (!isDigit(text.front()))
+        {
+            return fail(PatternErrorKind::BAD_CHARACTER, number, quoteCharacter(text.front()));
+        }
+        const auto node = readNode(text, number, tree.nodes);
+        if (!node)
+        {
+            return std::unexpected(node.error());
+        }
+        const auto nodeFacts = innerFacts(*node, facts, number);
+        if (!nodeFacts)
+        {
+            return std::unexpected(nodeFacts.error());
+        }
+        tree.nodes.push_back(*node);
+        facts.push_back(*nodeFacts);
+    }
+    if (!tree.nodes.empty() && facts.back().population > 0)
+    {
+        // The root is centred on (0, 0).
+        const UniverseCoord half = UniverseCoord{1} << (tree.nodes.back().level - 1);
+        const UniverseRect& box  = facts.back().box;
+        tree.population          = facts.back().population;
+        tree.bounds              = {
+            .x0 = box.x0 - half, .y0 = box.y0 - half, .x1 = box.x1 - half, .y1 = box.y1 - half};
+    }
+    pattern.tree = std::move(tree);
+    return pattern;
+}
+
 }  // namespace
 
 std::string describe(const PatternError& error)
@@ -517,11 +796,12 @@ std::string describe(const PatternError& error)
             message += "The file is empty.";
             break;
         case PatternErrorKind::UNKNOWN_FORMAT:
-            message += "This is neither an RLE (.rle) nor a plaintext (.cells) pattern.";
+            message += "This is not an RLE (.rle), plaintext (.cells) or macrocell (.mc) pattern.";
             break;
         case PatternErrorKind::UNSUPPORTED_FORMAT:
             message += std::format(
-                "wxLife reads RLE (.rle) and plaintext (.cells) patterns, not {} files.",
+                "wxLife reads RLE (.rle), plaintext (.cells) and macrocell (.mc) patterns, not {} "
+                "files.",
                 error.detail);
             break;
         case PatternErrorKind::NO_HEADER:
@@ -549,6 +829,9 @@ std::string describe(const PatternError& error)
                     : std::format("The pattern is {} cells; a world has at most {} cells per side.",
                                   error.detail, formatCount(kMaxWorldSide));
             break;
+        case PatternErrorKind::BAD_NODE:
+            message += error.detail;
+            break;
     }
     return message;
 }
@@ -566,7 +849,7 @@ std::expected<Pattern, PatternError> readPattern(std::string_view text)
         }
         if (first.starts_with("[M2]"))
         {
-            return fail(PatternErrorKind::UNSUPPORTED_FORMAT, 0, "macrocell (.mc)");
+            return readMacrocell(Lines(text));
         }
         if (startsWithIgnoringCase(first, "#Life 1."))
         {
@@ -586,6 +869,23 @@ std::expected<Pattern, PatternError> readPattern(std::string_view text)
         return fail(PatternErrorKind::UNKNOWN_FORMAT, 0);
     }
     return fail(PatternErrorKind::EMPTY, 0);
+}
+
+std::expected<Pattern, std::string> readPatternData(std::string_view contents)
+{
+    std::string unpacked;
+    if (isGzip(contents))
+    {
+        std::expected<std::string, std::string> text = gunzip(contents, kMaxPatternBytes);
+        if (!text)
+        {
+            return std::unexpected(std::format("The file cannot be unpacked. {}", text.error()));
+        }
+        unpacked = std::move(*text);
+        contents = unpacked;
+    }
+    return readPattern(contents).transform_error(
+        [](const PatternError& error) { return describe(error); });
 }
 
 }  // namespace wxLife::core
