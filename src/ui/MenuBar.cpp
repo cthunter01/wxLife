@@ -11,6 +11,9 @@ namespace wxLife::ui
 wxMenuBar* buildMenuBar()
 {
     auto* file = new wxMenu;
+    file->Append(ID_OPEN_PATTERN, toWx("&Open Pattern…\tCtrl+O"));
+    file->Append(ID_DEMO_PATTERNS, toWx("&Demo Patterns…\tCtrl+D"));
+    file->AppendSeparator();
     file->Append(wxID_EXIT, "&Quit\tCtrl+Q");
 
     auto* automaton = new wxMenu;

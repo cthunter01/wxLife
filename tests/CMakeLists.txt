@@ -1,8 +1,9 @@
 set(test_sources
-    core/AntTests.cpp core/FormatTests.cpp core/GridTests.cpp core/LineTests.cpp core/PacerTests.cpp
-    core/ParallelBandsTests.cpp core/RandomTests.cpp core/RuleTests.cpp core/SpeedTests.cpp
-    core/StepperTests.cpp core/WorldLimitsTests.cpp core/WorldTests.cpp
-    render/RasterizerTests.cpp render/ViewportTests.cpp)
+    core/AntTests.cpp core/DemoTests.cpp core/FormatTests.cpp core/GridTests.cpp core/LineTests.cpp
+    core/PacerTests.cpp core/ParallelBandsTests.cpp core/PatternSetupTests.cpp core/PatternTests.cpp
+    core/RandomTests.cpp core/RuleTests.cpp core/SpeedTests.cpp core/StepperTests.cpp
+    core/WorldLimitsTests.cpp core/WorldTests.cpp
+    render/RasterizerTests.cpp render/ThumbnailTests.cpp render/ViewportTests.cpp)
 # The GUI smoke tests drive wxGTK: they type through GTK's own text entry and check how GTK behaves. So
 # they are built only where wx uses GTK, which is Linux (wxBUILD_TOOLKIT is wxWidgets' cache variable).
 set(gui_tests OFF)

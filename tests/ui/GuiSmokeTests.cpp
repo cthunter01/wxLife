@@ -17,7 +17,10 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <functional>
+#include <ios>
 #include <optional>
 #include <ostream>
 #include <print>
@@ -36,11 +39,13 @@
 #include <wx/dcclient.h>
 #include <wx/dialog.h>
 #include <wx/evtloop.h>
+#include <wx/filedlg.h>
 #include <wx/frame.h>
 #include <wx/init.h>
 #include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/modalhook.h>
+#include <wx/msgdlg.h>
 #include <wx/slider.h>
 #include <wx/spinctrl.h>
 #include <wx/statbox.h>
@@ -48,10 +53,12 @@
 #include <wx/statusbr.h>
 #include <wx/textctrl.h>
 #include <wx/timer.h>
+#include <wx/treectrl.h>
 #include <wx/utils.h>
 #include <wx/weakref.h>
 
 #include "wxLife/core/Ant.h"
+#include "wxLife/core/Demo.h"
 #include "wxLife/core/Format.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
@@ -422,6 +429,25 @@ void scroll(wxWindow& target, wxEventType type, int orientation, int position = 
     deliver(target, event);
 }
 
+// The item of `tree` whose text is `text`, searched depth first; an invalid id if there is none.
+wxTreeItemId findItem(const wxTreeCtrl& tree, const wxTreeItemId& parent, std::string_view text)
+{
+    wxTreeItemIdValue cookie = nullptr;
+    for (wxTreeItemId child = tree.GetFirstChild(parent, cookie); child.IsOk();
+         child              = tree.GetNextChild(parent, cookie))
+    {
+        if (toUtf8(tree.GetItemText(child)) == text)
+        {
+            return child;
+        }
+        if (const wxTreeItemId found = findItem(tree, child, text); found.IsOk())
+        {
+            return found;
+        }
+    }
+    return {};
+}
+
 // Answers modal dialogs instead of showing them. wx calls Enter() before it shows a modal dialog,
 // and ShowModal() returns any answer other than wxID_NONE at once.
 class DialogAnswers final : public wxModalDialogHook
@@ -441,14 +467,39 @@ public:
     std::vector<std::string> titles;     ///< Every dialog asked, in order.
     std::vector<std::string>
         sizeTexts;  ///< The texts the last "World Size" showed after the typing.
+    /// The tree item to choose in "Demo Patterns"; nullopt cancels.
+    std::optional<std::string> demo;
+    std::string                demoOpenedOn;  ///< The item "Demo Patterns" had selected at first.
+    std::vector<std::string>   demoTexts;     ///< The texts it showed for the chosen item.
+    std::vector<std::string>   messages;      ///< The text of every message box.
 
 protected:
     int Enter(wxDialog* dialog) override
     {
-        titles.push_back(toUtf8(dialog->GetTitle()));
+        if (dialog == nullptr)
+        {
+            return wxID_NONE;  // wx never asks about no dialog; this keeps the analyzer sure of it
+        }
+        // An unshown GTK file dialog has no title; its message is the title it will show.
+        const auto* files = dynamic_cast<const wxFileDialog*>(dialog);
+        titles.push_back(toUtf8(files != nullptr ? files->GetMessage() : dialog->GetTitle()));
+        if (auto* message = dynamic_cast<wxMessageDialog*>(dialog))
+        {
+            messages.push_back(toUtf8(message->GetMessage()));
+            return wxID_OK;
+        }
+        if (files != nullptr)
+        {
+            // GTK's chooser knows a file only once the user has picked it in the shown dialog.
+            return wxID_CANCEL;
+        }
+        if (titles.back() == "Demo Patterns")
+        {
+            return chooseDemo(*dialog);
+        }
         if (titles.back() != "World Size")
         {
-            return wxID_OK;  // message boxes
+            return wxID_OK;
         }
         if (!worldSize)
         {
@@ -468,6 +519,33 @@ protected:
         }
         const bool accepted = dialog->Validate();
         EXPECT_EQ(dialog->FindWindow(wxID_OK)->IsEnabled(), accepted);
+        return accepted ? wxID_OK : wxID_CANCEL;
+    }
+
+private:
+    // Like a user: select the item, read what the dialog says about it, and press Load, which
+    // wx accepts only if Validate() holds.
+    int chooseDemo(wxDialog& dialog)
+    {
+        auto& tree   = first<wxTreeCtrl>(dialog);
+        demoOpenedOn = toUtf8(tree.GetItemText(tree.GetSelection()));
+        if (!demo)
+        {
+            return wxID_CANCEL;
+        }
+        const wxTreeItemId item = findItem(tree, tree.GetRootItem(), *demo);
+        EXPECT_TRUE(item.IsOk()) << "no demo called " << *demo;
+        tree.SelectItem(item);
+        demoTexts.clear();
+        for (const wxStaticText* text : all<wxStaticText>(dialog))
+        {
+            // Without the line breaks that wrapping the description added.
+            std::string label = toUtf8(text->GetLabelText());
+            std::ranges::replace(label, '\n', ' ');
+            demoTexts.push_back(label);
+        }
+        const bool accepted = dialog.Validate();
+        EXPECT_EQ(dialog.FindWindow(wxID_OK)->IsEnabled(), accepted);
         return accepted ? wxID_OK : wxID_CANCEL;
     }
 };
@@ -929,6 +1007,9 @@ TEST_F(GuiSmokeTest, ZoomsScrollsFitsAndCentres)
 
     // Centre: the middle cell is under the canvas centre, and both scrollbars sit halfway.
     command(ID_CENTER_VIEW);
+    // The panel's world size text is longer now, so the canvas may be narrower once GTK has laid
+    // the window out again; the view follows at the next paint.
+    repaint();
     const std::optional<core::CellPos> middle = pointAt(canvasCentre());
     ASSERT_TRUE(middle);
     EXPECT_NEAR(middle.value().x, 256, 1);
@@ -1335,6 +1416,142 @@ TEST_F(GuiSmokeTest, ResizesTheWorldThroughTheSizeDialog)
     // The keyboard help is a modal message box too.
     command(ID_SHOW_CONTROLS_HELP);
     EXPECT_EQ(answers.titles.back(), "Keyboard and Mouse");
+}
+
+TEST_F(GuiSmokeTest, LoadsDemoPatterns)
+{
+    DialogAnswers answers;
+    command(ID_RUN_PAUSE);
+
+    // Cancel changes nothing, and the simulation goes on.
+    const core::Extent extent = m_world.extent();
+    command(ID_DEMO_PATTERNS);
+    EXPECT_EQ(answers.titles, std::vector<std::string>{"Demo Patterns"});
+    EXPECT_EQ(answers.demoOpenedOn, core::demos().front().name);
+    EXPECT_EQ(m_world.extent(), extent);
+    EXPECT_EQ(status(StatusField::STATE), "Running");
+
+    // The panel button opens the same dialog. The gun gets its own world, edges and speed, and
+    // waits at generation 0.
+    answers.demo = "Gosper glider gun";
+    click(labelled<wxButton>(*m_panel, toUtf8(toWx("Demos…"))));
+    EXPECT_TRUE(std::ranges::contains(answers.demoTexts, "Bill Gosper, 1970"));
+    EXPECT_TRUE(std::ranges::contains(
+        answers.demoTexts,
+        std::ranges::find(core::demos(), "Gosper glider gun", &core::Demo::name)->about));
+    EXPECT_EQ(m_world.extent(), (core::Extent{320, 240}));
+    EXPECT_EQ(m_world.topology(), core::Topology::BOUNDED);
+    EXPECT_EQ(m_world.population(), 36);
+    EXPECT_EQ(m_world.generation(), 0U);
+    EXPECT_EQ(status(StatusField::STATE), "Paused");
+    EXPECT_EQ(status(StatusField::WORLD), "320 × 240 · bounded · B3/S23 · Banded");
+    EXPECT_EQ(status(StatusField::SPEED), "30 gen/s");
+    EXPECT_FALSE(menuItem(ID_TOGGLE_WRAP).IsChecked());
+    EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
+    repaint();
+    for (int g = 0; g < 30; ++g)
+    {
+        command(ID_STEP);
+    }
+    EXPECT_EQ(m_world.population(), 41);  // one glider more
+
+    // The Primer runs at Max and opens on its machine, not on the whole world.
+    answers.demo = "Primer";
+    command(ID_DEMO_PATTERNS);
+    EXPECT_EQ(answers.demoOpenedOn, "Gosper glider gun");  // the dialog remembers the last demo
+    EXPECT_EQ(m_world.extent(), (core::Extent{3840, 3694}));
+    EXPECT_TRUE(menuItem(ID_TOGGLE_MAX_SPEED).IsChecked());
+    EXPECT_EQ(status(StatusField::SPEED), "Max");
+    // The panel's world size text is longer now, so the canvas may be narrower once GTK has laid
+    // the window out again; the view follows at the next paint.
+    repaint();
+    const std::optional<core::CellPos> middle = pointAt(canvasCentre());
+    ASSERT_TRUE(middle.has_value());
+    // The middle of the view: the Primer is at (400, 3000), and its view spans x -300..480 and
+    // y -40..334 from there.
+    EXPECT_LE(std::abs(middle.value().x - 490), 1);
+    EXPECT_LE(std::abs(middle.value().y - 3147), 1);
+
+    // An ant demo switches the automaton and places its ants on an empty world.
+    answers.demo = "Four ants in a square";
+    command(ID_DEMO_PATTERNS);
+    EXPECT_EQ(m_world.automaton(), core::Automaton::LANGTON_ANT);
+    EXPECT_TRUE(menuItem(ID_AUTOMATON_ANT).IsChecked());
+    EXPECT_EQ(m_world.ants().size(), 4U);
+    EXPECT_EQ(m_world.population(), 0);
+    EXPECT_EQ(status(StatusField::WORLD), "120 × 120 · Langton's ant · 4 ants");
+    command(ID_STEP);
+    EXPECT_EQ(m_world.population(), 4);
+
+    // A Life demo switches back.
+    answers.demo = "Pulsar";
+    command(ID_DEMO_PATTERNS);
+    EXPECT_EQ(m_world.automaton(), core::Automaton::LIFE);
+    EXPECT_EQ(m_world.population(), 48);
+
+    // A category is no demo: Load stays disabled, and Enter changes nothing.
+    answers.demo = "Guns";
+    command(ID_DEMO_PATTERNS);
+    EXPECT_EQ(m_world.extent(), (core::Extent{25, 25}));
+    EXPECT_EQ(m_world.population(), 48);
+}
+
+TEST_F(GuiSmokeTest, OpensPatternFiles)
+{
+    DialogAnswers answers;  // NOLINT(misc-const-correctness): wx fills it in through the hook
+    const std::filesystem::path folder = std::filesystem::temp_directory_path();
+    const auto                  write  = [&](std::string_view name, std::string_view text) {
+        const std::filesystem::path path = folder / name;
+        std::ofstream(path, std::ios::binary) << text;
+        return path;
+    };
+    const std::filesystem::path glider =
+        write("wxLife_test_glider.rle", "#N Glider\nx = 3, y = 3, rule = B36/S23\nbo$2bo$3o!\n");
+    const std::filesystem::path noPattern = write("wxLife_test_bad.rle", "hello\n");
+    const std::filesystem::path huge =
+        write("wxLife_test_huge.rle", "x = 4195, y = 330721, rule = B3/S23\n!\n");
+
+    // Cancel changes nothing.
+    const core::Extent extent = m_world.extent();
+    command(ID_OPEN_PATTERN);
+    EXPECT_EQ(answers.titles, std::vector<std::string>{"Open Pattern"});
+    EXPECT_EQ(m_world.extent(), extent);
+    EXPECT_EQ(status(StatusField::STATE), "Paused");
+
+    // The pattern in a world with room around it, under the rule the file names. The edges stay.
+    // GTK's file chooser only knows a file once the user has picked it in the shown dialog, so
+    // the file goes straight to what File → Open does with it.
+    command(ID_RUN_PAUSE);
+    EXPECT_TRUE(m_frame->openPatternFile(toWx(glider.string())));
+    EXPECT_TRUE(answers.messages.empty());
+    EXPECT_EQ(m_world.extent(), (core::Extent{103, 103}));
+    EXPECT_EQ(m_world.population(), 5);
+    EXPECT_EQ(m_world.at({.x = 51, .y = 50}), core::kAlive);
+    EXPECT_EQ(m_world.generation(), 0U);
+    EXPECT_EQ(status(StatusField::STATE), "Paused");
+    EXPECT_EQ(status(StatusField::WORLD), "103 × 103 · torus · B36/S23 · Banded");
+    EXPECT_EQ(m_canvas->cellSize(), fittedCellSize());
+    repaint();
+
+    // Files that cannot be used say why and leave the world alone.
+    EXPECT_FALSE(m_frame->openPatternFile(toWx(noPattern.string())));
+    EXPECT_FALSE(m_frame->openPatternFile(toWx(huge.string())));
+    EXPECT_FALSE(m_frame->openPatternFile(toWx((folder / "wxLife_test_missing.rle").string())));
+    EXPECT_EQ(answers.messages,
+              (std::vector<std::string>{
+                  "Cannot open wxLife_test_bad.rle.\n\nThis is neither an RLE (.rle) nor a "
+                  "plaintext (.cells) pattern.",
+                  "Cannot open wxLife_test_huge.rle.\n\nLine 1: The pattern is 4,195 × 330,721 "
+                  "cells; a world has at most 100,000 cells per side.",
+                  "Cannot open wxLife_test_missing.rle.\n\nThe file cannot be read.",
+              }));
+    EXPECT_EQ(m_world.extent(), (core::Extent{103, 103}));
+    EXPECT_EQ(m_world.population(), 5);
+
+    for (const std::filesystem::path& path : {glider, noPattern, huge})
+    {
+        std::filesystem::remove(path);
+    }
 }
 
 TEST_F(GuiSmokeTest, QuitsCleanlyInTheMiddleOfAStroke)

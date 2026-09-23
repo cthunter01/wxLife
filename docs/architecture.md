@@ -19,13 +19,16 @@ All numbers below were measured on the development machine unless marked otherwi
 +--------------------------------------------------------------------------+
 | app/     LifeApp (wxApp, owns the World)                                 |
 | ui/      MainFrame, WorldCanvas, ControlPanel, WorldSizeDialog,          |
-|          SimulationRunner, MenuBar, CommandIds, Defaults,                |
+|          DemoDialog, SimulationRunner, MenuBar, CommandIds, Defaults,    |
 |          Theme, WxConvert                  lib wxLife_ui (wx::core, base)|
 +--------------------------------------------------------------------------+
-| render/  Types, Viewport, PixelBuffer, RenderStyle, Rasterizer           |
+| render/  Types, Viewport, PixelBuffer, RenderStyle, Rasterizer,          |
+|          Thumbnail                                                       |
 | core/    Types, Line, Rule, Ant, Grid, Random, ParallelBands, Stepper,   |
 |          ReferenceStepper, StepKernel, BandedStepper, World,             |
-|          WorldLimits, Speed, Pacer, Format   lib wxLife_lib (+ Threads)  |
+|          WorldLimits, Speed, Pacer, Format, Pattern, PatternSetup,       |
+|          Demo, EmbeddedFile (+ the generated EmbeddedPatterns.cpp)       |
+|                                             lib wxLife_lib (+ Threads)  |
 +--------------------------------------------------------------------------+
 src/Main.cpp:  exe wxLife -> wxLife_ui
 tools/bench:   wxLife_bench -> wxLife_lib
@@ -66,11 +69,12 @@ Every other place that shows one of these values is only a view of it.
 | Cell size, scroll offset, grid-line flag, colours | `ui::WorldCanvas`, through `render::Viewport` and `render::RenderStyle` (colours from `wxLife/ui/Theme.h`) |
 | Random-fill density, rule text being edited, preset selection | The `ui::ControlPanel` widgets |
 | Memory budget | `MainFrame`, computed once with `core::defaultMemoryBudget()` |
+| The demo chosen last, the folder File → Open looked in last | `MainFrame` (`m_lastDemo`, `m_lastPatternDir`) |
 | Start-up values | `wxLife/ui/Defaults.h` |
 
 **Only two classes change the World,** and both run on the UI thread:
 - `MainFrame` changes it in response to user commands: clear, randomize, `setCells`, resize, rule,
-  topology and engine.
+  topology, engine, and loading a pattern (`loadPattern()`).
 - `SimulationRunner` changes it by calling `World::step()`.
 
 `WorldCanvas` only reads the World. It hands mouse strokes to `MainFrame` through its `paintCells`
@@ -194,6 +198,56 @@ a prototype, even 2 bands were faster than 1 (see Extension points below).
 
 The pacer and the meter take the time as an argument, so their tests never sleep.
 
+## Patterns and demos (`core`, `DemoDialog`)
+
+**Pattern files.** `readPattern()` (`wxLife/core/Pattern.h`) reads RLE and plaintext (`.cells`) text into
+a `Pattern`: the live cells relative to the pattern's top-left corner, its extent, rule, name, author and
+comments. It recognises the format from the first line that is not blank, and it refuses what it cannot
+run with a `PatternError` that names the line: macrocell and Life 1.0x files, multi-state cells, rules
+that are not two-state B/S rules, and patterns wider or taller than `kMaxWorldSide`. A header that
+declares such a size is refused before a single cell is read, so the 30 MB Caterpillar file fails at
+its second line. `core` reads no files; `MainFrame` reads the bytes with `wxFFile` and hands them over.
+
+**The embedded files.** The demos' RLE files live in `patterns/`, listed in `src/CMakeLists.txt`.
+`cmake/EmbedPatterns.cmake` turns them into one generated source of `char` arrays (string literals would
+hit MSVC's 64 KiB limit) behind `embeddedPatternFiles()` (`wxLife/core/EmbeddedFile.h`). The program
+therefore needs no data files, and no platform-specific way to find them. The generated source is
+rewritten only when a pattern changes, and clang-tidy skips it (`SKIP_LINTING`).
+
+**The catalogue.** `demos()` (`wxLife/core/Demo.h`) is a table of `Demo`s: name, category, credit,
+description, file, and the world the demo runs in, which is its size, topology, where the pattern goes,
+speed, the part of the world to show first, and for the ant demos the automaton and the ants. Every
+setting was chosen by running the demo headlessly:
+- A glider that reaches a dead edge vanishes cleanly, so the guns fire forever in bounded worlds.
+- The methuselahs' worlds are large enough that their evolution, apart from the escaping gliders, is
+  cell for cell the same as on an unbounded plane.
+- The prime calculators throw streams of spaceships up and to the right. An unbounded plane swallows
+  them; a bounded or wrapping world sends wreckage back, which reaches the machine after roughly four
+  times the distance to the edges in generations. Their worlds are as large as a quick load allows, and
+  their descriptions say how many primes come out right, as measured.
+
+`DemoTest` checks the table against the files, and pins a few descriptions to the real patterns: the
+Gosper gun's period, the Primer's first primes and the ant demos' promises.
+
+**Loading.** `PatternSetup` (`wxLife/core/PatternSetup.h`) is everything a load changes. `demoSetup()`
+makes it from a `Demo`; `fileSetup()` makes it for a file: the pattern in the middle of a world with
+half its size of room on each side (at least `kMinFileMargin`), halving the room until the world fits the
+memory budget. `MainFrame::loadPattern()` then applies it in one place: stop the runner, resize or clear
+the world and call `worldExtentChanged()` at once (as a resize does), set the topology, the rule, the
+ants and the automaton, set the cells with `World::setCells(cells, kAlive, origin)`, set the speed, and
+show `setup.view` with `WorldCanvas::showCells()`. The world waits at generation 0.
+
+**The view.** `Viewport::fitCells()` is `fitWorld()` for part of the world: the largest cell size that
+shows the cells, centred on them as far as clamping allows. `WorldCanvas` keeps whatever it last fitted
+(`m_keptFit`, the whole world for `fitWorld()`) through canvas size changes, as it always kept the fitted
+world, so a demo's view survives the window settling into its size.
+
+**The dialog.** `DemoDialog` lists the categories and demos in a `wxTreeCtrl`. For the selected demo it
+shows the credit, a preview drawn by `render::drawThumbnail()`, the pattern's size, the world and the
+description. A demo over the memory budget is listed, but Load is disabled and the dialog says why;
+`Validate()` refuses Enter too, as `WorldSizeDialog` does. Patterns are read when first shown and kept
+for the dialog's lifetime.
+
 ## Rendering and the camera (`render`, `WorldCanvas`)
 
 **Units.** Everything on the canvas is measured in *device* pixels (`render::Pixel`, 64-bit). A cell
@@ -306,6 +360,12 @@ Ctrl+wheel → WorldCanvas::onWheel → Viewport::zoomBy(steps, pointer) → cam
 
 G key on the canvas → WorldCanvas::onKeyDown → emitCommand(ID_TOGGLE_GRID)
   → the same MainFrame::onToggleGrid as the menu item and the check box
+
+[Demos…] or File → Demo Patterns… → MainFrame::onDemoPatterns → DemoDialog::ask (modal)
+  → core::demoPattern(demo) + core::demoSetup() → MainFrame::loadPattern
+  → World::resize (or clear) + WorldCanvas::worldExtentChanged() → topology, rule, ants, automaton
+  → World::setCells(cells, kAlive, origin) → runner speed → WorldCanvas::showCells(view)
+  → syncControls() + worldContentChanged()
 ```
 
 **Strokes.**
@@ -456,6 +516,11 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
   to 100, and 1500 random scenes, each with up to three ants. The reference gains one branch for them —
   an ant colours the body of its cell but never a grid line — so the overlay, its clipping and both
   paint paths are covered by the same oracle. Hand-drawn text-art frames cover the special cases.
+- **`PatternTest`** reads RLE and plaintext text, including the tolerances real files need (CRLF, runs
+  split by white space and line ends, a missing `!`, every rule spelling), and every error with its line.
+  **`PatternSetupTest`** covers the demo and file setups, including the margins shrinking to the budget.
+  **`DemoTest`** checks every demo against its embedded file and world, and runs the Gosper gun, the
+  first primes of the Primer and the ant demos. **`ThumbnailTest`** compares previews with text art.
 - **`ViewportTest`** checks anchored zoom for every pair of zoom steps and every anchor position inside
   a cell against a floating-point reference, checks that zooming there and back restores the offset,
   and compares `cellAt` and `visibleCells` with brute-force results.
@@ -492,9 +557,10 @@ The last row is the limit of stepping on the UI thread. Background stepping is a
 | Other rule families (Generations, Larger than Life) | Only the steppers interpret a `Rule`; the rest of the code only parses, prints and compares it. `Cell` is a byte. | Make `Rule` a `std::variant` and give each family its own stepper, plus a case in `Rule::toString()`, `findPreset()` and the preset list. The rasterizer would need colours for the extra states. |
 | More automata (other turmites, multi-state ants) | `Automaton`, `kAutomata` and the `default`-less switch in `World::step()`; `wxLife/core/Ant.h` holds the ant's own rule | Add an enum value and a `kAutomata` entry; `-Wswitch` then points at the four switches that need a case: `toString(Automaton)`, `World::step()`, and `worldText()` and `automatonMenuItem()` in `src/ui/MainFrame.cpp`. The panel's choice is built from `kAutomata`, so it needs no change. Multi-state cells would additionally break the binary assumptions listed in the row above. With a third automaton it is time to extract an interface from `World` instead of widening the switch. |
 | Other topologies (cylinder, Klein bottle) | `Topology` and `kTopologies`. `-Wswitch` lists the `core` code that needs a case: `toString(Topology)`, `Grid::updateBorder()` and the `alive` lambda in `ReferenceStepper::step()`. | Add an enum value, a `kTopologies` entry and a copy rule; `StepperTest` and `WorldTest` then cover it. The Wrap Edges toggle in `MainFrame` would become a choice. |
-| Sparse or infinite worlds, HashLife | The UI uses only `World`'s public interface | Extract an interface from `World` once a second implementation exists. `Rasterizer::render()` takes the dense `Grid` from `World::cells()`, so it would read cells through the new interface too. `Viewport` would need an unbounded extent. |
+| Sparse or infinite worlds, HashLife | The UI uses only `World`'s public interface | Extract an interface from `World` once a second implementation exists. `Rasterizer::render()` takes the dense `Grid` from `World::cells()`, so it would read cells through the new interface too. `Viewport` would need an unbounded extent. It would bring the patterns that do not fit a dense world, such as the Caterpillar (4,195 × 330,721 cells) and Gemini, and let the prime calculators run without their streams hitting an edge; `readPattern()` would then need macrocell files. |
 | Zooming out below 1 px, a minimap | `Viewport` (`int` cell size) and `Rasterizer` | Replace the cell size with a scale type, and add a downsampling path. |
-| Pattern files (RLE, plaintext) | `core` has no wx dependency | Add a new `core` reader that returns `std::expected`, a `World` stamping function, and File → Open/Save. |
+| More demos | `patterns/`, `demo_patterns` in `src/CMakeLists.txt`, `kDemos` in `src/core/Demo.cpp` | Add the file, list it, and add a `Demo`; `DemoTest` checks the rest. `patterns/README.md` has the steps. |
+| Saving patterns, more file formats | `readPattern()`, `MainFrame::openPatternFile()` | An RLE writer next to the reader and File → Save. Life 1.06 would be a third reader behind the same format check. |
 | Undo/redo, selection | Every edit enters through a `CommandId` or through `paintCells` → `MainFrame::onPaintCells()` | Let `World::setCells()` report the changed cells, and add an undo stack in `ui/`. |
 | Themes, saved settings | `RenderStyle`, `darkStyle()`/`lightStyle()`, `ui::defaults` and `Speed` are plain values. Only `wxLife/ui/Theme.h` (`themeStyle()`, `useErrorColour()`) picks colours from the desktop theme. | Load and save them with `wxConfig` in `LifeApp`. A user theme would replace the choice in `wxLife/ui/Theme.h`. |
 | Parallel rasterizer, OpenGL canvas | `Rasterizer::render()` (pixel rows are independent); `WorldCanvas::onPaint()` is the only blit | Use `forEachBand()` over pixel rows, or add a `wxGLCanvas` variant (turn `wxUSE_OPENGL` back on). |
@@ -518,3 +584,5 @@ Headers are in `include/wxLife/`, sources in `src/`.
 11. `ui/SimulationRunner.cpp`: the one-shot timer.
 12. `ui/WorldCanvas.cpp`: painting, scrollbars, mouse and keys.
 13. `ui/MainFrame.cpp`: the command table, syncing the controls, and the status bar.
+14. `core/Pattern.cpp`, `core/Demo.cpp`, `core/PatternSetup.cpp`: reading pattern files, the demo
+    catalogue, and what loading one does; then `MainFrame::loadPattern()`.

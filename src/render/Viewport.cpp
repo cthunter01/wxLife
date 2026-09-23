@@ -117,17 +117,25 @@ void Viewport::zoomBy(int steps, PixelPoint anchor) noexcept
 
 void Viewport::fitWorld() noexcept
 {
+    fitCells({.x0 = 0, .y0 = 0, .x1 = m_world.width, .y1 = m_world.height});
+}
+
+void Viewport::fitCells(core::CellRect cells) noexcept
+{
     // Cell size that fits along one axis; an empty axis does not limit it.
     const auto fits = [](Pixel canvas, core::Coord side) {
         return side > 0 ? canvas / side : Pixel{kMaxCellSize};
     };
-    const Pixel size =
-        std::min(fits(m_canvas.width, m_world.width), fits(m_canvas.height, m_world.height));
-    m_cellSize = static_cast<int>(std::clamp(size, Pixel{kMinCellSize}, Pixel{kMaxCellSize}));
-    const PixelSize content = contentSize();
+    const Pixel size = std::min(fits(m_canvas.width, cells.x1 - cells.x0),
+                                fits(m_canvas.height, cells.y1 - cells.y0));
+    m_cellSize       = static_cast<int>(std::clamp(size, Pixel{kMinCellSize}, Pixel{kMaxCellSize}));
 
-    m_offset = {.x = (content.width - m_canvas.width) / 2,
-                .y = (content.height - m_canvas.height) / 2};
+    // The centre of the cells under the centre of the canvas.
+    const auto axis = [this](core::Coord from, core::Coord to, Pixel canvas) {
+        return (((Pixel{from} + to) * m_cellSize) - canvas) / 2;
+    };
+    m_offset = {.x = axis(cells.x0, cells.x1, m_canvas.width),
+                .y = axis(cells.y0, cells.y1, m_canvas.height)};
     clampOffset();
 }
 

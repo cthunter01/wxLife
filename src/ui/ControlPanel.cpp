@@ -366,14 +366,17 @@ void ControlPanel::addWorldGroup(wxSizer& column)
 
     m_worldInfo  = new wxStaticText(box, wxID_ANY, wxString());
     auto* resize = new wxButton(box, wxID_ANY, toWx("Resize…"));
+    auto* demos  = new wxButton(box, wxID_ANY, toWx("Demos…"));
     m_wrap       = new wxCheckBox(box, wxID_ANY, "Wrap edges");
+    demos->SetToolTip("Famous patterns, each in a world set up for it");
     m_wrap->SetToolTip("Opposite edges are neighbours (a torus)");
 
     sendOn(*resize, wxEVT_BUTTON, ID_WORLD_SIZE);
+    sendOn(*demos, wxEVT_BUTTON, ID_DEMO_PATTERNS);
     sendOn(*m_wrap, wxEVT_CHECKBOX, ID_TOGGLE_WRAP);
 
     group->Add(m_worldInfo, rowFlags());
-    group->Add(buttonGrid({resize}), rowFlags());
+    group->Add(buttonGrid({resize, demos}), rowFlags());
     group->Add(m_wrap, rowFlags());
     column.Add(group, wxSizerFlags().Expand().Border(wxLEFT | wxRIGHT | wxBOTTOM));
 }

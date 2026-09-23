@@ -71,6 +71,29 @@ TEST(WorldTest, StartsEmptyWithTheGivenSettings)
     EXPECT_EQ(defaults.topology(), Topology::TORUS);
 }
 
+TEST(WorldTest, SetCellsMovesTheCellsByTheOffset)
+{
+    World                      world({.width = 5, .height = 4});
+    const std::vector<CellPos> glider{
+        {.x = 1, .y = 0}, {.x = 2, .y = 1}, {.x = 0, .y = 2}, {.x = 1, .y = 2}, {.x = 2, .y = 2}};
+    EXPECT_EQ(world.setCells(glider, kAlive, {.x = 2, .y = 1}), 5);
+    EXPECT_EQ(toAscii(world.cells()),
+              ".....\n"
+              "...O.\n"
+              "....O\n"
+              "..OOO\n");
+    EXPECT_EQ(world.population(), 5);
+
+    // Cells that land outside are left out, also for offsets far enough to overflow 32 bits.
+    world.clear();
+    EXPECT_EQ(world.setCells(glider, kAlive, {.x = 3, .y = 2}), 1);  // only (1, 0) lands inside
+    EXPECT_EQ(world.at({.x = 4, .y = 2}), kAlive);
+    constexpr Coord kFar = std::numeric_limits<Coord>::max();
+    EXPECT_EQ(world.setCells(glider, kAlive, {.x = kFar, .y = kFar}), 0);
+    EXPECT_EQ(world.setCells(glider, kAlive, {.x = -kFar, .y = 0}), 0);
+    EXPECT_EQ(world.population(), 1);
+}
+
 TEST(WorldTest, GliderOnATorusReturnsHome)
 {
     World world({.width = 8, .height = 8});

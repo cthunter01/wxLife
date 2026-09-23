@@ -107,11 +107,17 @@ void WorldCanvas::zoomBy(int steps)
 
 void WorldCanvas::fitWorld()
 {
+    const core::Extent extent = m_world.extent();
+    showCells({.x0 = 0, .y0 = 0, .x1 = extent.width, .y1 = extent.height});
+}
+
+void WorldCanvas::showCells(core::CellRect cells)
+{
     // The fit is kept while the canvas size changes: wx reports provisional sizes before and just
     // after Show(), and under Wayland the display scale can still change after the first frame.
-    m_keepFitted = true;
+    m_keptFit = cells;
     m_viewport.setCanvasSize(deviceClientSize());
-    m_viewport.fitWorld();
+    m_viewport.fitCells(cells);
     viewportChanged();
 }
 
@@ -583,7 +589,7 @@ void WorldCanvas::viewportChanged()
 
 void WorldCanvas::cameraMoved()
 {
-    m_keepFitted = false;
+    m_keptFit.reset();
     viewportChanged();
 }
 
@@ -595,9 +601,9 @@ bool WorldCanvas::syncCanvasSize()
         return false;
     }
     m_viewport.setCanvasSize(size);
-    if (m_keepFitted)
+    if (m_keptFit)
     {
-        m_viewport.fitWorld();
+        m_viewport.fitCells(*m_keptFit);
     }
     return true;
 }

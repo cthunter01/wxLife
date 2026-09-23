@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <expected>
 #include <format>
 #include <new>
 #include <optional>
@@ -16,14 +17,21 @@
 #include <wx/aboutdlg.h>
 #include <wx/button.h>
 #include <wx/checkbox.h>
+#include <wx/ffile.h>
+#include <wx/filedlg.h>
+#include <wx/filename.h>
+#include <wx/log.h>
 #include <wx/menu.h>
 #include <wx/msgdlg.h>
 #include <wx/sizer.h>
 #include <wx/statusbr.h>
 #include <wx/utils.h>
 
+#include "wxLife/core/Demo.h"
 #include "wxLife/core/Format.h"
 #include "wxLife/core/Pacer.h"
+#include "wxLife/core/Pattern.h"
+#include "wxLife/core/PatternSetup.h"
 #include "wxLife/core/ReferenceStepper.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Speed.h"
@@ -35,6 +43,7 @@
 #include "wxLife/ui/CommandIds.h"
 #include "wxLife/ui/ControlPanel.h"
 #include "wxLife/ui/Defaults.h"
+#include "wxLife/ui/DemoDialog.h"
 #include "wxLife/ui/MenuBar.h"
 #include "wxLife/ui/SimulationRunner.h"
 #include "wxLife/ui/WorldCanvas.h"
@@ -72,6 +81,7 @@ Everywhere (a focused text or number box keeps its own editing
 keys, such as Ctrl+Home and Ctrl+Delete)
     F5: run or pause    F6: step
     Ctrl+] and Ctrl+[: faster and slower    Ctrl+M: max speed
+    Ctrl+O: open a pattern file    Ctrl+D: demo patterns
     Ctrl+R: randomize    Ctrl+Delete: clear    Ctrl+L: edit the rule
     Ctrl+N: world size    Ctrl+T: wrap edges
     Ctrl+= and Ctrl+-: zoom    Ctrl+0: fit    Ctrl+Home: center    Ctrl+G: grid lines
@@ -112,6 +122,38 @@ using StatusBar = wxStatusBar;
 [[nodiscard]] std::string countText(std::int64_t n)
 {
     return core::formatCount(static_cast<std::uint64_t>(n));
+}
+
+[[nodiscard]] std::string sizeText(core::Extent extent)
+{
+    return std::format("{} × {}", countText(extent.width), countText(extent.height));
+}
+
+/// Pattern files larger than this are not read: no pattern that fits a world is anywhere near it.
+constexpr std::uint64_t kMaxPatternFileBytes = std::uint64_t{256} << 20;
+
+// The whole file, or a message that says why it cannot be read.
+[[nodiscard]] std::expected<std::string, std::string> readPatternFile(const wxString& path)
+{
+    const wxLogNull    quiet;  // the message box below says what went wrong, not wx's log
+    wxFFile            file(path, "rb");
+    const wxFileOffset length = file.IsOpened() ? file.Length() : wxInvalidOffset;
+    if (length < 0)
+    {
+        return std::unexpected(std::string("The file cannot be read."));
+    }
+    if (std::cmp_greater(length, kMaxPatternFileBytes))
+    {
+        return std::unexpected(std::format("The file is {}; pattern files over {} are not read.",
+                                           core::formatBytes(static_cast<std::uint64_t>(length)),
+                                           core::formatBytes(kMaxPatternFileBytes)));
+    }
+    std::string text(static_cast<std::size_t>(length), '\0');
+    if (file.Read(text.data(), text.size()) != text.size())
+    {
+        return std::unexpected(std::string("The file cannot be read."));
+    }
+    return text;
 }
 
 // The Engine menu item of each engine. There is no default, so -Wswitch points here when an
@@ -221,6 +263,8 @@ void MainFrame::bindCommands()
         {ID_STEP, &MainFrame::onStep},
         {ID_CLEAR, &MainFrame::onClear},
         {ID_RANDOMIZE, &MainFrame::onRandomize},
+        {ID_OPEN_PATTERN, &MainFrame::onOpenPattern},
+        {ID_DEMO_PATTERNS, &MainFrame::onDemoPatterns},
         {ID_FASTER, &MainFrame::onFaster},
         {ID_SLOWER, &MainFrame::onSlower},
         {ID_TOGGLE_MAX_SPEED, &MainFrame::onToggleMaxSpeed},
@@ -301,6 +345,77 @@ void MainFrame::onRandomize()
 {
     m_world.randomize(m_panel->randomDensity(), freshSeed());
     worldContentChanged();
+}
+
+void MainFrame::onOpenPattern()
+{
+    const bool wasRunning = m_runner.isRunning();
+    m_runner.stop();
+    m_canvas->cancelStroke();
+
+    wxFileDialog dialog(this, "Open Pattern", m_lastPatternDir, wxString(),
+                        "Pattern files (*.rle;*.cells)|*.rle;*.cells|All files|*",
+                        wxFD_OPEN | wxFD_FILE_MUST_EXIST);
+    if (dialog.ShowModal() == wxID_OK && openPatternFile(dialog.GetPath()))
+    {
+        return;  // paused at generation 0
+    }
+    // Cancelled, or the file could not be used: everything goes on as before.
+    if (wasRunning)
+    {
+        m_runner.start();
+    }
+    syncControls();
+    updateStatusBar(true);
+}
+
+bool MainFrame::openPatternFile(const wxString& path)
+{
+    m_lastPatternDir                                   = wxFileName(path).GetPath();
+    const std::expected<std::string, std::string> text = readPatternFile(path);
+    const auto pattern = text.and_then([](const std::string& contents) {
+        return core::readPattern(contents).transform_error(
+            [](const core::PatternError& error) { return core::describe(error); });
+    });
+    const auto setup   = pattern.and_then([this](const core::Pattern& read) {
+        return core::fileSetup(read, m_world.rule(), m_world.topology(), m_memoryBudget)
+            .transform_error([&](core::ExtentError error) {
+                return std::format("The pattern is {} cells. {}", sizeText(read.extent),
+                                   core::describe(error, read.extent, m_memoryBudget));
+            });
+    });
+    if (!setup)
+    {
+        const std::string message = std::format(
+            "Cannot open {}.\n\n{}", toUtf8(wxFileName(path).GetFullName()), setup.error());
+        wxMessageBox(toWx(message), "Open Pattern", wxOK | wxICON_ERROR, this);
+        return false;
+    }
+    loadPattern(*pattern, *setup);
+    return true;
+}
+
+void MainFrame::onDemoPatterns()
+{
+    const bool wasRunning = m_runner.isRunning();
+    m_runner.stop();
+    m_canvas->cancelStroke();
+
+    const std::optional<std::size_t> chosen = DemoDialog::ask(this, m_lastDemo, m_memoryBudget);
+    if (!chosen)
+    {
+        if (wasRunning)
+        {
+            m_runner.start();
+        }
+        syncControls();
+        updateStatusBar(true);
+        return;
+    }
+    m_lastDemo                  = chosen;
+    const core::Demo&   demo    = core::demos()[*chosen];
+    const core::Pattern pattern = core::demoPattern(demo);
+    loadPattern(pattern, core::demoSetup(demo, pattern));
 }
 
 void MainFrame::onFaster()
@@ -545,6 +660,70 @@ void MainFrame::onHoverChanged(std::optional<core::CellPos> cell)
 {
     m_hovered = cell;
     updateStatusBar(true);
+}
+
+void MainFrame::loadPattern(const core::Pattern& pattern, const core::PatternSetup& setup)
+{
+    m_runner.stop();
+    m_canvas->cancelStroke();
+    // The callers offer only worlds that fit; checking again keeps the budget safe whatever they
+    // do.
+    if (const auto valid = core::validateExtent(setup.world, m_memoryBudget); !valid)
+    {
+        wxMessageBox(toWx(core::describe(valid.error(), setup.world, m_memoryBudget)),
+                     "Load Pattern", wxOK | wxICON_ERROR, this);
+        syncControls();
+        updateStatusBar(true);
+        return;
+    }
+    try
+    {
+        const wxBusyCursor busy;
+        if (setup.world == m_world.extent())
+        {
+            m_world.clear();
+        }
+        else
+        {
+            m_world.resize(setup.world, false);
+        }
+        m_canvas->worldExtentChanged();  // at once, so no paint sees the old extent
+    }
+    catch (const std::bad_alloc&)
+    {
+        // World::resize() has the strong guarantee: the old world is intact.
+        const std::string message =
+            std::format("There is not enough memory for a {} world. The current world was kept.",
+                        sizeText(setup.world));
+        wxMessageBox(toWx(message), "Load Pattern", wxOK | wxICON_ERROR, this);
+        syncControls();
+        updateStatusBar(true);
+        return;
+    }
+
+    m_world.setTopology(setup.topology);
+    applyRule(setup.rule);
+    if (setup.automaton == core::Automaton::LANGTON_ANT)
+    {
+        m_world.setAnts(setup.ants);  // before the switch, which would add an ant to an empty list
+    }
+    m_world.setAutomaton(setup.automaton);
+    m_world.setCells(pattern.cells, core::kAlive, setup.origin);
+    if (setup.speed)
+    {
+        m_runner.setSpeed(*setup.speed);
+    }
+    if (m_world.stepper().kind() == core::StepperKind::REFERENCE &&
+        m_world.extent().cellCount() > core::ReferenceStepper::kRecommendedMaxCells)
+    {
+        m_world.setStepper(core::makeStepper(core::StepperKind::BANDED));
+    }
+    if (setup.view)
+    {
+        m_canvas->showCells(*setup.view);
+    }
+    syncControls();
+    worldContentChanged();
 }
 
 void MainFrame::applyRule(const core::Rule& rule)

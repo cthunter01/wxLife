@@ -62,6 +62,9 @@ public:
     void zoomBy(int steps, PixelPoint anchor) noexcept;
     /// Largest size (≥ 1) that shows the whole world; centres it.
     void fitWorld() noexcept;
+    /// Largest size (≥ 1) that shows every cell of `cells`, and centres them as far as the clamping
+    /// allows. An empty side does not limit the size.
+    void fitCells(core::CellRect cells) noexcept;
     void centerOn(core::CellPos cell) noexcept;
     /// Positive values move the view right/down.
     void panBy(Pixel dx, Pixel dy) noexcept;

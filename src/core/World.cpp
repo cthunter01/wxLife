@@ -131,13 +131,22 @@ void World::step()
     ++m_generation;
 }
 
-CellCount World::setCells(std::span<const CellPos> cells, Cell value) noexcept
+CellCount World::setCells(std::span<const CellPos> cells, Cell value, CellPos offset) noexcept
 {
     assert(value == kDead || value == kAlive);
-    CellCount changed = 0;
-    for (const CellPos p : cells)
+    const Extent bounds  = extent();
+    CellCount    changed = 0;
+    for (const CellPos cell : cells)
     {
-        if (extent().contains(p) && m_current.at(p) != value)
+        // 64-bit, so a far-away position cannot wrap around into the world.
+        const std::int64_t x = std::int64_t{cell.x} + offset.x;
+        const std::int64_t y = std::int64_t{cell.y} + offset.y;
+        if (x < 0 || y < 0 || x >= bounds.width || y >= bounds.height)
+        {
+            continue;
+        }
+        const CellPos p{.x = static_cast<Coord>(x), .y = static_cast<Coord>(y)};
+        if (m_current.at(p) != value)
         {
             m_current.set(p, value);
             ++changed;

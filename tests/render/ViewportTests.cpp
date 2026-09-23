@@ -624,6 +624,33 @@ TEST(ViewportTest, FitWorldHandlesEmptyInputs)
     EXPECT_EQ(text(noWorld.visibleCells()), "empty");
 }
 
+TEST(ViewportTest, FitCellsShowsPartOfTheWorld)
+{
+    // 40 × 20 cells on an 800 × 600 canvas: 20 px per cell (min(800 / 40, 600 / 20)), with the
+    // middle of the cells, (120, 210), in the middle of the canvas.
+    Viewport viewport =
+        makeViewport({.width = 1000, .height = 1000}, {.width = 800, .height = 600}, 4);
+    viewport.fitCells({.x0 = 100, .y0 = 200, .x1 = 140, .y1 = 220});
+    EXPECT_EQ(viewport.cellSize(), 20);
+    EXPECT_EQ(text(viewport.offset()), "(2000, 3900)");
+    EXPECT_EQ(text(viewport.visibleCells()), "[100, 140) x [195, 225)");
+
+    // In a corner, clamping keeps the view inside the world: the cells are shown, not centred.
+    viewport.fitCells({.x0 = 0, .y0 = 0, .x1 = 10, .y1 = 10});
+    EXPECT_EQ(viewport.cellSize(), 60);  // min(800 / 10, 600 / 10)
+    EXPECT_EQ(text(viewport.offset()), "(0, 0)");
+
+    // Cells that do not fit even at 1 px: the view opens on their middle, as fitWorld() does.
+    viewport.fitCells({.x0 = 0, .y0 = 0, .x1 = 1000, .y1 = 1000});
+    EXPECT_EQ(viewport.cellSize(), 1);
+    EXPECT_EQ(text(viewport.offset()), "(100, 200)");
+    Viewport whole =
+        makeViewport({.width = 1000, .height = 1000}, {.width = 800, .height = 600}, 4);
+    whole.fitWorld();
+    EXPECT_EQ(whole.cellSize(), viewport.cellSize());
+    EXPECT_EQ(text(whole.offset()), text(viewport.offset()));
+}
+
 TEST(ViewportTest, CenterOnPutsTheCellInTheMiddle)
 {
     Viewport viewport =

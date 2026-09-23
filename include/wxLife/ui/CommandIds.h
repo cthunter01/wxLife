@@ -16,6 +16,8 @@ enum CommandId : int  // NOLINT(cppcoreguidelines-use-enum-class,performance-enu
     ID_STEP,
     ID_CLEAR,
     ID_RANDOMIZE,
+    ID_OPEN_PATTERN,
+    ID_DEMO_PATTERNS,
     ID_RESET_ANTS,  ///< Read ControlPanel::antCount().
     ID_FASTER,
     ID_SLOWER,

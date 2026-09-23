@@ -50,7 +50,9 @@ public:
     void zoomBy(int steps);
     /// Fits the world into the canvas and keeps it fitted through canvas size changes until the
     /// user zooms or scrolls.
-    void               fitWorld();
+    void fitWorld();
+    /// Like fitWorld(), for part of the world: fits and centres `cells`, and keeps them fitted.
+    void               showCells(core::CellRect cells);
     void               centerWorld();
     [[nodiscard]] bool showGrid() const noexcept;
     void               setShowGrid(bool show);
@@ -116,8 +118,10 @@ private:
     std::optional<render::PixelPoint> m_pointer;
     std::optional<core::CellPos>      m_hovered;
 
-    bool   m_keepFitted       = false;  ///< Set by fitWorld(), cleared by cameraMoved().
-    double m_wheelZoomNotches = 0.0;    ///< Leftover fractions from smooth-scrolling devices.
+    /// The cells kept fitted through canvas size changes. Set by fitWorld() and showCells(),
+    /// cleared by cameraMoved().
+    std::optional<core::CellRect> m_keptFit;
+    double m_wheelZoomNotches = 0.0;  ///< Leftover fractions from smooth-scrolling devices.
     double m_wheelPanX        = 0.0;
     double m_wheelPanY        = 0.0;
 };

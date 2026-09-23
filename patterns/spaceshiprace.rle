@@ -1,0 +1,13 @@
+#N Spaceship race
+#O John Conway; David Eppstein; David Bell; Josh Ball; 'zdr'
+#C Seven orthogonal spaceships side by side, all heading north: LWSS, MWSS and HWSS
+#C (c/2), weekender (2c/7), spider (c/5), loafer (c/7) and copperhead (c/10).
+#C Assembled for wxLife from the LifeWiki pattern files.
+x = 122, y = 12, rule = B3/S23
+3o9b3o10b3o11bo12bo18bo7bo24bo10b2o2b2o$o2bo8bo2bo9bo2bo10bo12bo12b2ob
+obob2o3b2obobob2o17bobo11b2o$o11bo12bo12bobo10bobo8b3obob3o9b3obob3o
+13bo2bo11b2o$o11bo3bo8bo3bo9bo12bo9bo3bobo5bobo5bobo3bo14b2o9bobo2bobo
+$bobo8bo12bo3bo9bo12bo13b2o6bobo6b2o29bo6bo$13bobo9bo14bo3b4o3bo11b2o
+9bobo9b2o11bo5bo$26bobo15b4o15b2ob2o15b2ob2o10bobo3bo9bo6bo$40b4o4b4o
+15bo15bo13bo2bo3b2o9b2o2b2o$97bo2b2o3bo10b4o$42bo6bo$43b2o2b2o68b2o$
+117b2o!

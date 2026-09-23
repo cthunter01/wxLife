@@ -11,6 +11,14 @@ smoothly at every zoom level, and a 10000 × 10000 world stays usable.
 
 - Any B/S rule (`B3/S23`, `B36/S23`, `B/S`, …) plus ten presets: Conway's Life, HighLife, Seeds,
   Day & Night, Life without Death, Maze, 2x2, Replicator, Diamoeba and Morley.
+- **Demo patterns**: File → Demo Patterns… (or the panel's Demos… button) lists 43 famous patterns in
+  eight groups: spaceships, guns, puffers and rakes, breeders, methuselahs, oscillators, computation
+  (the Primer prime sieve, the twin prime and (p, p+8) prime calculators, and Paul Rendell's Turing
+  machine and universal Turing machine) and Langton's ant setups. The dialog shows who found each one,
+  a preview and what to watch for. Loading one sets up the world it runs best in: size, edges, speed
+  and the part of the world to show.
+- **Pattern files**: File → Open Pattern… reads RLE (`.rle`) and plaintext (`.cells`) files, such as
+  the ones on LifeWiki, into a world with room around the pattern.
 - **Langton's ant** as a second automaton, chosen in Simulation → Automaton or in the side panel. Each
   ant turns right on a dead cell and left on a live one, flips the cell and steps forward; a generation
   is one move for every ant. Up to 64 ants share a world and move in order, so each one sees what the
@@ -236,12 +244,15 @@ single-key shortcut, so they cannot be triggered by accident.
 | Ctrl+0 | View → Fit World |
 | Ctrl+Home | View → Center World |
 | Ctrl+G | View → Grid Lines |
+| Ctrl+O | File → Open Pattern… |
+| Ctrl+D | File → Demo Patterns… |
 | F1 | Help → Keyboard and Mouse… |
 | Ctrl+Q | File → Quit |
 
 The panel on the left has the same actions, plus:
 - the automaton to run, and how many ants it gets (1–64) with a Reset button beside it;
 - the random-fill density (1–100%);
+- a Demos… button next to Resize…, which opens the demo patterns;
 - an exact speed box and an exact cell-size box;
 - a rule box: type a rule and press Enter, or click Apply.
 
@@ -257,8 +268,8 @@ unfocused one the wheel does nothing, and the panel does not scroll either.
 
 | Layer | Headers and sources | CMake target | Contents | Uses |
 |---|---|---|---|---|
-| core | `include/wxLife/core`, `src/core` | `wxLife_lib` | Simulation, size limits, speed and pacing | Standard library and threads |
-| render | `include/wxLife/render`, `src/render` | `wxLife_lib` | Pixel types, camera and pixel rasterizer | core |
+| core | `include/wxLife/core`, `src/core` | `wxLife_lib` | Simulation, pattern files and demos, size limits, speed and pacing | Standard library and threads |
+| render | `include/wxLife/render`, `src/render` | `wxLife_lib` | Pixel types, camera, pixel rasterizer and thumbnails | core |
 | ui | `include/wxLife/ui`, `src/ui` | `wxLife_ui` | Windows, input, theme colours and the simulation timer | render, core, wxWidgets |
 | app | `include/wxLife/app`, `src/app` | `wxLife_ui` | `LifeApp`, which owns the `World` | ui, wxWidgets |
 
@@ -282,6 +293,23 @@ with wrapping edges and Conway's rule, 25% random fill, one ant, 30 generations 
     size until it is valid.
   - During a resize the old and the new world exist at the same time.
   - "Keep the current pattern" keeps the pattern centred.
+- **Demo patterns.** Loading a demo replaces the world, pauses at generation 0 and sets the world size,
+  edges, rule, speed and automaton the demo was tuned for. Every setting was chosen by running the
+  demo: gliders from the guns vanish cleanly at the dead edges, and the methuselahs evolve exactly as
+  on an unbounded plane.
+  - The prime calculators send streams of spaceships up and to the right, which an unbounded plane
+    would swallow. Here they crash into the edges, and the wreckage comes back after 8,000 to 14,000
+    generations; each description says how far its calculator is right until then.
+  - The universal Turing machine's world needs about 330 MB. A demo that does not fit the memory
+    budget is listed but cannot be loaded, and the dialog says why.
+  - Patterns far larger than a world can be, such as the Caterpillar spaceship (4,195 × 330,721 cells),
+    need a HashLife engine and are not included. [patterns/README.md](patterns/README.md) lists the
+    sources and how to add a demo.
+- **Pattern files.** File → Open Pattern… puts the pattern in the middle of a new world with half its
+  size, but at least 50 cells, of room on each side, shrunk to fit the memory budget if needed. The
+  rule is the one the file names (RLE `rule =` or `#r`); a file without one keeps the current rule, and
+  the edges and the speed stay as they are. Macrocell (`.mc`), Life 1.05/1.06 and multi-state files
+  are refused with a message, and so is a pattern wider or taller than 100,000 cells.
 - **Engine.** The Reference engine can be chosen only for worlds of up to 1,000,000 cells. Resizing to
   a larger world switches back to Banded. Only Life uses an engine at all.
 - **Langton's ant.** A world carries 0 to 64 ants. Switching to the ant seeds one in the middle;
@@ -372,3 +400,10 @@ the GUI smoke tests do not run at all, the whole list is the only check of the i
 - [ ] Switch the desktop between light and dark while the app runs: the world and the error lines follow.
 - [ ] Switch windows during a drag (capture loss), then keep using the mouse.
 - [ ] Run with `GDK_BACKEND=x11` and with `GDK_SCALE=2`: at 1 px, one cell is one physical pixel.
+- [ ] File → Demo Patterns…: the preview, the credit and the description follow the selection; a
+      double click or Enter on a demo loads it, on a group opens or closes the group. With
+      `GDK_SCALE=2` the preview is sharp.
+- [ ] Load the Primer and run it at Max: lightweight spaceships leave the sieve to the left, 120
+      generations apart for 2, 3, 5 and 7.
+- [ ] File → Open Pattern…: open an `.rle` and a `.cells` file downloaded from LifeWiki, and a text file
+      that is neither, which is refused with a message.

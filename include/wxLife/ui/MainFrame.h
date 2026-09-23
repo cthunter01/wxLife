@@ -1,13 +1,17 @@
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <span>
 
 #include <wx/event.h>
 #include <wx/frame.h>
+#include <wx/string.h>
 
 #include "wxLife/core/Pacer.h"
+#include "wxLife/core/Pattern.h"
+#include "wxLife/core/PatternSetup.h"
 #include "wxLife/core/Rule.h"
 #include "wxLife/core/Stepper.h"
 #include "wxLife/core/Types.h"
@@ -29,6 +33,12 @@ public:
     /// `world` is owned by LifeApp and outlives this frame.
     explicit MainFrame(core::World& world);
 
+    /// Loads the RLE or plaintext pattern file at `path` into a world with room around it, as
+    /// File → Open does after its dialog, and pauses at generation 0.
+    /// @return false, after a message box that says why, if the file cannot be used; the world
+    ///         is then unchanged.
+    bool openPatternFile(const wxString& path);
+
 private:
     void buildLayout();
     void bindCommands();
@@ -38,6 +48,8 @@ private:
     void onStep();
     void onClear();
     void onRandomize();
+    void onOpenPattern();
+    void onDemoPatterns();
     void onFaster();
     void onSlower();
     void onToggleMaxSpeed();
@@ -70,6 +82,10 @@ private:
     void onViewChanged();
     void onHoverChanged(std::optional<core::CellPos> cell);
 
+    /// Replaces the world with `pattern` as `setup` says: size, edges, rule, automaton, ants, speed
+    /// and view. The simulation is paused at generation 0 afterwards. On failure the world is kept
+    /// and a message says why.
+    void loadPattern(const core::Pattern& pattern, const core::PatternSetup& setup);
     void applyRule(const core::Rule& rule);
     void setAutomaton(core::Automaton automaton);
     void setEngine(core::StepperKind kind);
@@ -86,6 +102,8 @@ private:
     WorldCanvas*                 m_canvas{};  ///< Owned by wx.
     ControlPanel*                m_panel{};   ///< Owned by wx.
     std::optional<core::CellPos> m_hovered;
+    std::optional<std::size_t>   m_lastDemo;        ///< Index into core::demos(), for the dialog.
+    wxString                     m_lastPatternDir;  ///< Where File → Open looks first.
     core::Clock::time_point      m_lastStatusUpdate;
 };
 

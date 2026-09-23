@@ -43,10 +43,11 @@ public:
     /// Advances one generation: a whole Life step, or one move for each ant in turn.
     void step();
 
-    /// Sets every listed cell; positions outside the world are ignored. generation is unchanged.
+    /// Sets every listed cell, moved by `offset`; positions outside the world are ignored.
+    /// generation is unchanged. The offset places a pattern read from a file.
     /// @pre value is kDead or kAlive
     /// @return number of cells that actually changed.
-    CellCount setCells(std::span<const CellPos> cells, Cell value) noexcept;
+    CellCount setCells(std::span<const CellPos> cells, Cell value, CellPos offset = {}) noexcept;
     /// @return true if the cell changed.
     bool setCell(CellPos p, Cell value) noexcept;
     /// All dead; generation = 0; the ants start over.
